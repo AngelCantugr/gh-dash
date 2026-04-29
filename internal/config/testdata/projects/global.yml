@@ -1,0 +1,8 @@
+projectsSections:
+  - title: "Global Section"
+    owners:
+      - org:global-org
+cache:
+  enabled: true
+state:
+  enabled: true
