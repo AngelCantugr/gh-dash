@@ -1,0 +1,26 @@
+[
+  {
+    "ID": "PVT_001",
+    "Number": "1",
+    "Title": "Q1 Roadmap",
+    "URL": "https://github.com/users/test-user/projects/1",
+    "Owner": {"Kind": "user", "Login": "test-user"},
+    "Closed": false,
+    "Public": true,
+    "ItemsCount": 10,
+    "OpenItemsCountLoaded": 0,
+    "UpdatedAt": "2024-01-15T10:00:00Z"
+  },
+  {
+    "ID": "PVT_005",
+    "Number": "5",
+    "Title": "User Ideas",
+    "URL": "https://github.com/users/test-user/projects/5",
+    "Owner": {"Kind": "user", "Login": "test-user"},
+    "Closed": true,
+    "Public": false,
+    "ItemsCount": 3,
+    "OpenItemsCountLoaded": 0,
+    "UpdatedAt": "2024-01-08T10:00:00Z"
+  }
+]
