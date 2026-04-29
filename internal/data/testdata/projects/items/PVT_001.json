@@ -1,0 +1,70 @@
+{
+  "schema": {
+    "statusField": {
+      "id": "FIELD_STATUS_001",
+      "options": [
+        {"id": "OPT_TODO",        "name": "Todo",        "color": "BLUE"},
+        {"id": "OPT_IN_PROGRESS", "name": "In Progress", "color": "YELLOW"},
+        {"id": "OPT_DONE",        "name": "Done",        "color": "GREEN"}
+      ]
+    },
+    "extraFields": {
+      "FIELD_PRIORITY_001": {"id": "FIELD_PRIORITY_001", "name": "Priority"},
+      "FIELD_ITER_001":     {"id": "FIELD_ITER_001",     "name": "Iteration"}
+    },
+    "extraFieldOrder": ["FIELD_PRIORITY_001", "FIELD_ITER_001"]
+  },
+  "items": [
+    {
+      "id": "PVTI_ISSUE_001",
+      "type": 0,
+      "title": "Fix login bug",
+      "repo": "owner/my-repo",
+      "url": "https://github.com/owner/my-repo/issues/1",
+      "fields": {
+        "FIELD_STATUS_001":   {"kind": "single_select", "value": {"optionId": "OPT_TODO",  "name": "Todo"}},
+        "FIELD_PRIORITY_001": {"kind": "text",          "value": {"text": "High"}},
+        "FIELD_ITER_001":     {"kind": "iteration",     "value": {"iterationId": "ITER_1", "title": "Sprint 1", "startDate": "2024-01-01", "duration": 14}}
+      },
+      "updatedAt": "2024-01-15T10:00:00Z"
+    },
+    {
+      "id": "PVTI_PR_001",
+      "type": 1,
+      "title": "Add feature X",
+      "repo": "owner/my-repo",
+      "url": "https://github.com/owner/my-repo/pull/2",
+      "fields": {
+        "FIELD_STATUS_001": {"kind": "single_select", "value": {"optionId": "OPT_IN_PROGRESS", "name": "In Progress"}},
+        "FIELD_ESTIMATE":   {"kind": "number",        "value": {"number": 3.0}}
+      },
+      "updatedAt": "2024-01-14T10:00:00Z"
+    },
+    {
+      "id": "PVTI_DRAFT_001",
+      "type": 2,
+      "title": "Draft: Improve onboarding",
+      "repo": "",
+      "url": "",
+      "fields": {
+        "FIELD_STATUS_001": {"kind": "single_select", "value": {"optionId": "OPT_TODO", "name": "Todo"}},
+        "FIELD_DATE_001":   {"kind": "date",          "value": {"date": "2024-02-01"}}
+      },
+      "updatedAt": "2024-01-13T10:00:00Z"
+    },
+    {
+      "id": "PVTI_REDACTED_001",
+      "type": 3,
+      "title": "",
+      "repo": "",
+      "url": "",
+      "fields": {},
+      "updatedAt": "2024-01-12T10:00:00Z"
+    }
+  ],
+  "pageInfo": {
+    "HasNextPage": false,
+    "StartCursor": "",
+    "EndCursor": ""
+  }
+}

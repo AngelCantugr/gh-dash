@@ -309,6 +309,516 @@ func ownerKindString(kind OwnerKind) string {
 	return "unknown"
 }
 
+// --------------------------------------------------------------------------
+// FetchProjectItems — cursor-paginated project item fetch
+// --------------------------------------------------------------------------
+
+const (
+	projectItemsCacheTTL  = 5 * time.Minute
+	projectFieldsMaxFirst = 50
+	// projectFieldValuesMax is the per-item fieldValues ceiling sent to GraphQL.
+	// The literal "20" in the fieldValues tag below must stay in sync with this value.
+	projectFieldValuesMax = 20
+)
+
+// gqlFieldRef is the common shape for a field reference inside a field-value node.
+// All ProjectV2FieldCommon implementors expose id directly.
+type gqlFieldRef struct {
+	Id string `graphql:"id"`
+}
+
+// gqlFieldOption is one option in a single-select field's option list.
+type gqlFieldOption struct {
+	Id    string `graphql:"id"`
+	Name  string
+	Color string
+}
+
+// gqlFieldNode represents a ProjectV2FieldConfiguration union node.
+type gqlFieldNode struct {
+	TypeName      string `graphql:"__typename"`
+	AsField       struct {
+		Id       string `graphql:"id"`
+		Name     string
+		DataType string
+	} `graphql:"... on ProjectV2Field"`
+	AsSingleSelect struct {
+		Id      string `graphql:"id"`
+		Name    string
+		Options []gqlFieldOption
+	} `graphql:"... on ProjectV2SingleSelectField"`
+	AsIteration struct {
+		Id   string `graphql:"id"`
+		Name string
+	} `graphql:"... on ProjectV2IterationField"`
+}
+
+// gqlFieldValueNode represents a ProjectV2ItemFieldValue union node.
+type gqlFieldValueNode struct {
+	TypeName      string `graphql:"__typename"`
+	AsSingleSelect struct {
+		Field   gqlFieldRef
+		OptionId string
+		Name     string
+	} `graphql:"... on ProjectV2ItemFieldSingleSelectValue"`
+	AsNumber struct {
+		Field  gqlFieldRef
+		Number *float64
+	} `graphql:"... on ProjectV2ItemFieldNumberValue"`
+	AsDate struct {
+		Field gqlFieldRef
+		Date  string
+	} `graphql:"... on ProjectV2ItemFieldDateValue"`
+	AsIteration struct {
+		Field       gqlFieldRef
+		IterationId string
+		Title       string
+		StartDate   string
+		Duration    int
+	} `graphql:"... on ProjectV2ItemFieldIterationValue"`
+	AsText struct {
+		Field gqlFieldRef
+		Text  string
+	} `graphql:"... on ProjectV2ItemFieldTextValue"`
+}
+
+// gqlItemNode represents a single ProjectV2Item from the items connection.
+type gqlItemNode struct {
+	Id       string `graphql:"id"`
+	ItemType string `graphql:"type"`
+	Content  struct {
+		AsIssue struct {
+			Title  string
+			Number int
+			Url    string `graphql:"url"`
+			Repository struct {
+				NameWithOwner string
+			}
+		} `graphql:"... on Issue"`
+		AsPR struct {
+			Title  string
+			Number int
+			Url    string `graphql:"url"`
+			Repository struct {
+				NameWithOwner string
+			}
+		} `graphql:"... on PullRequest"`
+		AsDraftIssue struct {
+			Title string
+		} `graphql:"... on DraftIssue"`
+	}
+	FieldValues struct {
+		Nodes    []gqlFieldValueNode
+		PageInfo struct {
+			HasNextPage bool
+			EndCursor   string
+		}
+	} `graphql:"fieldValues(first: 20)"`
+	UpdatedAt time.Time
+}
+
+// FetchProjectItems pages items for a given project.
+//
+// after empty ⇒ first page (checks cache). after non-empty ⇒ load-more:
+// reads existing cached items, fetches the next page, stitches, and rewrites
+// the cache file atomically.
+//
+// extraFieldNames are YAML-configured field names that get resolved to field
+// IDs at schema time and stored in ProjectSchema.ExtraFields.
+func FetchProjectItems(
+	cache *persistcache.Store,
+	projectID, after string,
+	limit int,
+	extraFieldNames []string,
+) (ProjectSchema, []ProjectItemData, PageInfo, error) {
+	if config.IsFeatureEnabled(config.FF_MOCK_DATA) {
+		return fetchProjectItemsMockData(projectID)
+	}
+
+	if err := ensureProjectsClient(); err != nil {
+		return ProjectSchema{}, nil, PageInfo{}, fmt.Errorf("FetchProjectItems: init client: %w", err)
+	}
+
+	cacheKey := fmt.Sprintf("project-items/%s", projectID)
+	isFirstPage := after == ""
+
+	// First-page cache hit: return immediately without hitting the network.
+	if isFirstPage && cache != nil {
+		if raw, hit, err := cache.Get(cacheKey); err != nil {
+			log.Warn("FetchProjectItems: cache read error", "key", cacheKey, "err", err)
+		} else if hit {
+			var cached projectItemsCache
+			if jsonErr := json.Unmarshal(raw, &cached); jsonErr == nil {
+				log.Debug("FetchProjectItems: cache hit",
+					"project_id", projectID,
+					"item_count", len(cached.Items),
+				)
+				return cached.Schema, cached.Items, cached.PageInfo, nil
+			}
+		}
+	}
+
+	// Load-more: read existing items from cache to stitch with the new page.
+	var existingItems []ProjectItemData
+	if !isFirstPage && cache != nil {
+		if raw, hit, err := cache.Get(cacheKey); err == nil && hit {
+			var cached projectItemsCache
+			if jsonErr := json.Unmarshal(raw, &cached); jsonErr == nil {
+				existingItems = cached.Items
+			}
+		}
+	}
+
+	// Capture generation before the network call so PutIfFresh can detect
+	// a concurrent invalidation.
+	var capturedGen uint64
+	if cache != nil {
+		capturedGen = cache.Generation("project-items/")
+	}
+
+	// Build optional after-cursor.
+	var afterCursor *graphql.String
+	if after != "" {
+		s := graphql.String(after)
+		afterCursor = &s
+	}
+
+	var queryResult struct {
+		Node struct {
+			ProjectV2 struct {
+				Fields struct {
+					Nodes    []gqlFieldNode
+					PageInfo struct {
+						HasNextPage bool
+						EndCursor   string
+					}
+				} `graphql:"fields(first: 50)"`
+				Items struct {
+					TotalCount int
+					PageInfo   struct {
+						HasNextPage bool
+						EndCursor   string
+					}
+					Nodes []gqlItemNode
+				} `graphql:"items(first: $first, after: $after)"`
+			} `graphql:"... on ProjectV2"`
+		} `graphql:"node(id: $projectId)"`
+	}
+
+	variables := map[string]any{
+		"projectId": graphql.String(projectID),
+		"first":     graphql.Int(limit),
+		"after":     afterCursor,
+	}
+
+	log.Debug("FetchProjectItems: querying", "project_id", projectID, "after", after, "limit", limit)
+
+	if err := client.Query("FetchProjectItems", &queryResult, variables); err != nil {
+		return ProjectSchema{}, nil, PageInfo{}, fmt.Errorf("FetchProjectItems: query: %w", err)
+	}
+
+	proj := queryResult.Node.ProjectV2
+
+	// Warn if the fields connection is truncated.
+	if proj.Fields.PageInfo.HasNextPage {
+		log.Warn(fmt.Sprintf("FetchProjectItems: fields(first:%d) truncated — some fields may be missing", projectFieldsMaxFirst),
+			"project_id", projectID)
+	}
+
+	// Parse schema from the fields connection.
+	schema := parseProjectSchema(proj.Fields.Nodes, extraFieldNames)
+
+	// Status-field fallback: if fields were truncated and Status is still
+	// unset, paginate beyond field #50 to find it.
+	if schema.StatusField == nil && proj.Fields.PageInfo.HasNextPage {
+		log.Warn(fmt.Sprintf("FetchProjectItems: Status field not in first %d fields, running fallback", projectFieldsMaxFirst),
+			"project_id", projectID)
+		statusField, err := fetchStatusFieldFallback(projectID, proj.Fields.PageInfo.EndCursor)
+		if err != nil {
+			log.Warn("FetchProjectItems: Status fallback failed", "project_id", projectID, "err", err)
+		} else if statusField != nil {
+			schema.StatusField = statusField
+		}
+	}
+
+	// Parse items.
+	newItems := make([]ProjectItemData, 0, len(proj.Items.Nodes))
+	for _, node := range proj.Items.Nodes {
+		if node.FieldValues.PageInfo.HasNextPage {
+			log.Warn(fmt.Sprintf("FetchProjectItems: fieldValues(first:%d) truncated", projectFieldValuesMax),
+				"project_id", projectID, "item_id", node.Id)
+		}
+		newItems = append(newItems, parseProjectItem(node))
+	}
+
+	// Stitch new items onto any existing cached items (load-more).
+	allItems := append(existingItems, newItems...)
+
+	pageInfo := PageInfo{
+		HasNextPage: proj.Items.PageInfo.HasNextPage,
+		EndCursor:   proj.Items.PageInfo.EndCursor,
+	}
+
+	// Write accumulated result to cache.
+	if cache != nil {
+		cached := projectItemsCache{
+			Schema:   schema,
+			Items:    allItems,
+			PageInfo: pageInfo,
+		}
+		if raw, err := json.Marshal(cached); err == nil {
+			if putErr := cache.PutIfFresh(cacheKey, raw, projectItemsCacheTTL, capturedGen); putErr != nil {
+				if putErr != persistcache.ErrStaleGeneration {
+					log.Warn("FetchProjectItems: cache write error", "key", cacheKey, "err", putErr)
+				}
+			}
+		}
+	}
+
+	log.Debug("FetchProjectItems: done",
+		"project_id", projectID,
+		"new_items", len(newItems),
+		"total_items", len(allItems),
+		"has_next_page", pageInfo.HasNextPage,
+	)
+
+	return schema, allItems, pageInfo, nil
+}
+
+// fetchStatusFieldFallback cursor-paginates through fields beyond the first
+// 50 to find the "Status" single-select field.
+// Called only when fields(first:50) returned hasNextPage=true and no Status
+// field was found in the initial result.
+func fetchStatusFieldFallback(projectID, afterCursor string) (*StatusFieldDef, error) {
+	cursor := afterCursor
+	for {
+		var q struct {
+			Node struct {
+				ProjectV2 struct {
+					Fields struct {
+						Nodes    []gqlFieldNode
+						PageInfo struct {
+							HasNextPage bool
+							EndCursor   string
+						}
+					} `graphql:"fields(first: 50, after: $fieldAfter)"`
+				} `graphql:"... on ProjectV2"`
+			} `graphql:"node(id: $projectId)"`
+		}
+		vars := map[string]any{
+			"projectId":  graphql.String(projectID),
+			"fieldAfter": graphql.String(cursor),
+		}
+		if err := client.Query("FetchProjectFieldsFallback", &q, vars); err != nil {
+			return nil, err
+		}
+		for _, node := range q.Node.ProjectV2.Fields.Nodes {
+			if node.AsSingleSelect.Name == "Status" && node.AsSingleSelect.Id != "" {
+				def := &StatusFieldDef{ID: node.AsSingleSelect.Id}
+				for _, opt := range node.AsSingleSelect.Options {
+					def.Options = append(def.Options, StatusOption{
+						ID:    opt.Id,
+						Name:  opt.Name,
+						Color: opt.Color,
+					})
+				}
+				return def, nil
+			}
+		}
+		if !q.Node.ProjectV2.Fields.PageInfo.HasNextPage {
+			break
+		}
+		cursor = q.Node.ProjectV2.Fields.PageInfo.EndCursor
+	}
+	return nil, nil // Status field not found
+}
+
+// parseProjectSchema builds a ProjectSchema from a slice of field nodes.
+// extraFieldNames are resolved to field IDs; duplicates within the project
+// log a warn and the first match wins.
+func parseProjectSchema(fieldNodes []gqlFieldNode, extraFieldNames []string) ProjectSchema {
+	type namedField struct {
+		id   string
+		name string
+		node gqlFieldNode
+	}
+
+	var orderedFields []namedField
+	seenNames := make(map[string]bool)
+
+	for _, node := range fieldNodes {
+		var id, name string
+		switch {
+		case node.AsSingleSelect.Id != "":
+			id, name = node.AsSingleSelect.Id, node.AsSingleSelect.Name
+		case node.AsField.Id != "":
+			id, name = node.AsField.Id, node.AsField.Name
+		case node.AsIteration.Id != "":
+			id, name = node.AsIteration.Id, node.AsIteration.Name
+		default:
+			continue
+		}
+		if seenNames[name] {
+			log.Warn("FetchProjectItems: duplicate field name in project schema",
+				"field_name", name)
+			continue // first match wins
+		}
+		seenNames[name] = true
+		orderedFields = append(orderedFields, namedField{id: id, name: name, node: node})
+	}
+
+	// Detect Status field.
+	var statusField *StatusFieldDef
+	for _, f := range orderedFields {
+		if f.name == "Status" && f.node.AsSingleSelect.Id != "" {
+			def := &StatusFieldDef{ID: f.id}
+			for _, opt := range f.node.AsSingleSelect.Options {
+				def.Options = append(def.Options, StatusOption{
+					ID:    opt.Id,
+					Name:  opt.Name,
+					Color: opt.Color,
+				})
+			}
+			statusField = def
+			break
+		}
+	}
+
+	// Resolve extra fields by name.
+	nameToField := make(map[string]namedField, len(orderedFields))
+	for _, f := range orderedFields {
+		nameToField[f.name] = f
+	}
+
+	extraFields := make(map[string]FieldDef)
+	var extraFieldOrder []string
+	for _, name := range extraFieldNames {
+		if f, ok := nameToField[name]; ok {
+			if _, exists := extraFields[f.id]; !exists {
+				extraFields[f.id] = FieldDef{ID: f.id, Name: f.name}
+				extraFieldOrder = append(extraFieldOrder, f.id)
+			}
+		}
+	}
+
+	return ProjectSchema{
+		StatusField:     statusField,
+		ExtraFields:     extraFields,
+		ExtraFieldOrder: extraFieldOrder,
+	}
+}
+
+// parseItemType converts a raw GraphQL type string to an ItemType constant.
+func parseItemType(s string) ItemType {
+	switch s {
+	case "ISSUE":
+		return ItemTypeIssue
+	case "PULL_REQUEST":
+		return ItemTypePullRequest
+	case "DRAFT_ISSUE":
+		return ItemTypeDraftIssue
+	case "REDACTED":
+		return ItemTypeRedacted
+	default:
+		return ItemTypeRedacted
+	}
+}
+
+// parseProjectItem converts a gqlItemNode to a ProjectItemData.
+func parseProjectItem(node gqlItemNode) ProjectItemData {
+	itemType := parseItemType(node.ItemType)
+
+	var title, repo, url string
+	switch itemType {
+	case ItemTypeIssue:
+		title = node.Content.AsIssue.Title
+		repo = node.Content.AsIssue.Repository.NameWithOwner
+		url = node.Content.AsIssue.Url
+	case ItemTypePullRequest:
+		title = node.Content.AsPR.Title
+		repo = node.Content.AsPR.Repository.NameWithOwner
+		url = node.Content.AsPR.Url
+	case ItemTypeDraftIssue:
+		title = node.Content.AsDraftIssue.Title
+		// repo and url remain empty
+	case ItemTypeRedacted:
+		// all remain empty
+	}
+
+	fields := make(FieldValues)
+	for _, fvNode := range node.FieldValues.Nodes {
+		fieldID, fv := parseFieldValue(fvNode)
+		if fieldID != "" {
+			fields[fieldID] = fv
+		}
+	}
+
+	return ProjectItemData{
+		ID:        node.Id,
+		Type:      itemType,
+		Title:     title,
+		Repo:      repo,
+		URL:       url,
+		Fields:    fields,
+		UpdatedAt: node.UpdatedAt,
+	}
+}
+
+// parseFieldValue converts a gqlFieldValueNode to a (fieldID, FieldValue) pair.
+// Returns ("", FieldValueUnknown{}) for unrecognised or empty nodes.
+func parseFieldValue(node gqlFieldValueNode) (string, FieldValue) {
+	switch node.TypeName {
+	case "ProjectV2ItemFieldSingleSelectValue":
+		fieldID := node.AsSingleSelect.Field.Id
+		return fieldID, FieldValueSingleSelect{
+			OptionID: node.AsSingleSelect.OptionId,
+			Name:     node.AsSingleSelect.Name,
+		}
+	case "ProjectV2ItemFieldNumberValue":
+		fieldID := node.AsNumber.Field.Id
+		if node.AsNumber.Number == nil {
+			return fieldID, FieldValueUnknown{}
+		}
+		return fieldID, FieldValueNumber{Number: *node.AsNumber.Number}
+	case "ProjectV2ItemFieldDateValue":
+		fieldID := node.AsDate.Field.Id
+		return fieldID, FieldValueDate{Date: node.AsDate.Date}
+	case "ProjectV2ItemFieldIterationValue":
+		fieldID := node.AsIteration.Field.Id
+		return fieldID, FieldValueIteration{
+			IterationID: node.AsIteration.IterationId,
+			Title:       node.AsIteration.Title,
+			StartDate:   node.AsIteration.StartDate,
+			Duration:    node.AsIteration.Duration,
+		}
+	case "ProjectV2ItemFieldTextValue":
+		fieldID := node.AsText.Field.Id
+		return fieldID, FieldValueText{Text: node.AsText.Text}
+	default:
+		return "", FieldValueUnknown{}
+	}
+}
+
+// fetchProjectItemsMockData returns canned fixture data from
+// testdata/projects/items/<projectID>.json. The fixture is in
+// projectItemsCache format, ignoring the after cursor (mock always
+// returns the full first-page fixture).
+func fetchProjectItemsMockData(projectID string) (ProjectSchema, []ProjectItemData, PageInfo, error) {
+	path := filepath.Join("testdata", "projects", "items", projectID+".json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ProjectSchema{}, nil, PageInfo{}, nil
+		}
+		return ProjectSchema{}, nil, PageInfo{}, fmt.Errorf("mock data read %q: %w", path, err)
+	}
+	var cached projectItemsCache
+	if err := json.Unmarshal(raw, &cached); err != nil {
+		return ProjectSchema{}, nil, PageInfo{}, fmt.Errorf("mock data parse %q: %w", path, err)
+	}
+	return cached.Schema, cached.Items, cached.PageInfo, nil
+}
+
 // fetchProjectsMockData returns canned fixture data from testdata/projects/ for development.
 // Fixture files contain JSON-encoded []ProjectData per owner kind/login.
 func fetchProjectsMockData(owners []OwnerRef, filters ProjectFilters) ([]ProjectData, error) {
