@@ -72,7 +72,10 @@ func (a *ViewType) UnmarshalJSON(b []byte) error {
 	case "projects":
 		*a = ProjectsView
 	default:
-		return fmt.Errorf("unknown view type: %q (valid values: notifications, prs, issues, repo, projects)", s)
+		return fmt.Errorf(
+			"unknown view type: %q (valid values: notifications, prs, issues, repo, projects)",
+			s,
+		)
 	}
 
 	return nil

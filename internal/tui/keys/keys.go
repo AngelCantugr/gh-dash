@@ -215,7 +215,9 @@ var Keys = &KeyMap{
 }
 
 // Rebind will update our saved keybindings from configuration values.
-func Rebind(universal, issueKeys, prKeys, branchKeys, notificationKeys, projectKeys []config.Keybinding) error {
+func Rebind(
+	universal, issueKeys, prKeys, branchKeys, notificationKeys, projectKeys []config.Keybinding,
+) error {
 	err := rebindUniversal(universal)
 	if err != nil {
 		return err
