@@ -55,6 +55,7 @@ type Model struct {
 	currSectionId    int
 	footer           footer.Model
 	repo             section.Section
+	projects         []section.Section
 	prs              []section.Section
 	issues           []section.Section
 	notifications    []section.Section
@@ -151,6 +152,7 @@ func (m *Model) initScreen() tea.Msg {
 		cfg.Keybindings.Prs,
 		cfg.Keybindings.Branches,
 		cfg.Keybindings.Notifications,
+		cfg.Keybindings.Projects,
 	)
 	if err != nil {
 		showError(err)
@@ -1457,6 +1459,10 @@ func (m *Model) fetchAllViewSections() ([]section.Section, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		m.repo = &s
 		return nil, tea.Batch(cmds...)
+	case config.ProjectsView:
+		// Projects view: no data fetching yet — placeholder for PR #2
+		m.projects = []section.Section{}
+		return nil, tea.Batch(cmds...)
 	case config.NotificationsView:
 		s, notifCmd := notificationssection.FetchAllSections(m.ctx, m.notifications)
 		cmds = append(cmds, notifCmd)
@@ -1480,6 +1486,8 @@ func (m *Model) getCurrentViewSections() []section.Section {
 			return []section.Section{}
 		}
 		return []section.Section{m.repo}
+	case config.ProjectsView:
+		return m.projects
 	case config.NotificationsView:
 		if len(m.notifications) == 0 {
 			return []section.Section{}
@@ -1494,7 +1502,8 @@ func (m *Model) getCurrentViewSections() []section.Section {
 
 func (m *Model) getCurrentViewDefaultSection() int {
 	switch m.ctx.View {
-	case config.RepoView:
+	case config.RepoView, config.ProjectsView:
+		// Single-section views: no search section prefix, start at index 0
 		return 0
 	case config.NotificationsView:
 		return 1 // First notification section after search section
@@ -1540,6 +1549,13 @@ func (m *Model) setCurrentViewSections(newSections []section.Section) {
 		return
 	}
 
+	// ProjectsView: store directly, no search-section injection
+	if m.ctx.View == config.ProjectsView {
+		m.projects = newSections
+		m.tabs.SetSections(m.projects)
+		return
+	}
+
 	missingSearchSection := len(newSections) == 0 ||
 		(len(newSections) > 0 && newSections[0].GetId() != 0)
 	s := make([]section.Section, 0)
@@ -1582,6 +1598,7 @@ func (m *Model) setCurrentViewSections(newSections []section.Section) {
 
 func (m *Model) switchSelectedView() tea.Cmd {
 	repoFF := config.IsFeatureEnabled(config.FF_REPO_VIEW)
+	projectsFF := config.IsFeatureEnabled(config.FF_PROJECTS_VIEW)
 
 	// Reset notification subject when leaving notifications view
 	if m.ctx.View == config.NotificationsView {
@@ -1589,8 +1606,8 @@ func (m *Model) switchSelectedView() tea.Cmd {
 		m.notificationView.ClearSubject()
 	}
 
-	// View cycle: Notifications → PRs → Issues (→ Repo if enabled) → Notifications
-	if repoFF {
+	// View cycle: Notifications → PRs → Issues (→ Repo if enabled) (→ Projects if enabled) → Notifications
+	if repoFF && projectsFF {
 		switch m.ctx.View {
 		case config.NotificationsView:
 			m.ctx.View = config.PRsView
@@ -1599,6 +1616,30 @@ func (m *Model) switchSelectedView() tea.Cmd {
 		case config.IssuesView:
 			m.ctx.View = config.RepoView
 		case config.RepoView:
+			m.ctx.View = config.ProjectsView
+		case config.ProjectsView:
+			m.ctx.View = config.NotificationsView
+		}
+	} else if repoFF {
+		switch m.ctx.View {
+		case config.NotificationsView:
+			m.ctx.View = config.PRsView
+		case config.PRsView:
+			m.ctx.View = config.IssuesView
+		case config.IssuesView:
+			m.ctx.View = config.RepoView
+		case config.RepoView:
+			m.ctx.View = config.NotificationsView
+		}
+	} else if projectsFF {
+		switch m.ctx.View {
+		case config.NotificationsView:
+			m.ctx.View = config.PRsView
+		case config.PRsView:
+			m.ctx.View = config.IssuesView
+		case config.IssuesView:
+			m.ctx.View = config.ProjectsView
+		case config.ProjectsView:
 			m.ctx.View = config.NotificationsView
 		}
 	} else {
@@ -1654,6 +1695,14 @@ func (m *Model) isUserDefinedKeybinding(msg tea.KeyMsg) bool {
 
 	if m.ctx.View == config.RepoView {
 		for _, keybinding := range m.ctx.Config.Keybindings.Branches {
+			if keybinding.Builtin == "" && keybinding.Key == msg.String() {
+				return true
+			}
+		}
+	}
+
+	if m.ctx.View == config.ProjectsView {
+		for _, keybinding := range m.ctx.Config.Keybindings.Projects {
 			if keybinding.Builtin == "" && keybinding.Key == msg.String() {
 				return true
 			}

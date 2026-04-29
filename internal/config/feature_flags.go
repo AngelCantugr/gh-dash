@@ -4,6 +4,8 @@ import "os"
 
 const FF_REPO_VIEW = "FF_REPO_VIEW"
 
+const FF_PROJECTS_VIEW = "FF_PROJECTS_VIEW"
+
 const FF_MOCK_DATA = "FF_MOCK_DATA"
 
 func IsFeatureEnabled(name string) bool {
