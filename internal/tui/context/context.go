@@ -6,6 +6,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/dlvhdr/gh-dash/v4/internal/config"
+	"github.com/dlvhdr/gh-dash/v4/internal/persistcache"
+	"github.com/dlvhdr/gh-dash/v4/internal/state"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/theme"
 	"github.com/dlvhdr/gh-dash/v4/internal/utils"
 )
@@ -48,6 +50,12 @@ type ProgramContext struct {
 	StartTask            func(task Task) tea.Cmd
 	Theme                theme.Theme
 	Styles               Styles
+	// StateStore persists session state (cursor position, last section) to disk.
+	// Nil if the store could not be initialised — callers must guard with nil checks.
+	StateStore *state.Store
+	// ProjectsCache caches raw FetchProjects responses to disk.
+	// Nil if the cache could not be initialised — callers must guard with nil checks.
+	ProjectsCache *persistcache.Store
 }
 
 func (ctx *ProgramContext) GetViewSectionsConfig() []config.SectionConfig {
