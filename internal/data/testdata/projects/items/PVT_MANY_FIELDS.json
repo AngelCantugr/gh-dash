@@ -1,0 +1,31 @@
+{
+  "schema": {
+    "statusField": {
+      "id": "FIELD_STATUS_MANY",
+      "options": [
+        {"id": "OPT_BACKLOG", "name": "Backlog", "color": "GRAY"},
+        {"id": "OPT_ACTIVE",  "name": "Active",  "color": "GREEN"}
+      ]
+    },
+    "extraFields": {},
+    "extraFieldOrder": []
+  },
+  "items": [
+    {
+      "id": "PVTI_MANY_ISSUE_001",
+      "type": 0,
+      "title": "Issue in a project with many fields",
+      "repo": "owner/big-project",
+      "url": "https://github.com/owner/big-project/issues/10",
+      "fields": {
+        "FIELD_STATUS_MANY": {"kind": "single_select", "value": {"optionId": "OPT_BACKLOG", "name": "Backlog"}}
+      },
+      "updatedAt": "2024-01-20T10:00:00Z"
+    }
+  ],
+  "pageInfo": {
+    "HasNextPage": false,
+    "StartCursor": "",
+    "EndCursor": ""
+  }
+}
