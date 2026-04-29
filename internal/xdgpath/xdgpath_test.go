@@ -32,8 +32,8 @@ func TestCacheDir(t *testing.T) {
 	// the test is hermetic on Linux, macOS, and Windows alike.
 	setenv(t, "XDG_CACHE_HOME", tmp)
 	setenv(t, "HOME", tmp)
-	setenv(t, "USERPROFILE", tmp)     // Windows fallback
-	setenv(t, "LOCALAPPDATA", tmp)    // Windows %LocalAppData%
+	setenv(t, "USERPROFILE", tmp)  // Windows fallback
+	setenv(t, "LOCALAPPDATA", tmp) // Windows %LocalAppData%
 
 	dir, err := xdgpath.CacheDir()
 	require.NoError(t, err)
@@ -56,7 +56,7 @@ func TestConfigDir(t *testing.T) {
 	setenv(t, "XDG_CONFIG_HOME", tmp)
 	setenv(t, "HOME", tmp)
 	setenv(t, "USERPROFILE", tmp)
-	setenv(t, "APPDATA", tmp)    // Windows %AppData%
+	setenv(t, "APPDATA", tmp) // Windows %AppData%
 
 	dir, err := xdgpath.ConfigDir()
 	require.NoError(t, err)
