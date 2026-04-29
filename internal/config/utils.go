@@ -53,6 +53,13 @@ func (cfg NotificationsSectionConfig) ToSectionConfig() SectionConfig {
 	}
 }
 
+func (cfg ProjectsSectionConfig) ToSectionConfig() SectionConfig {
+	return SectionConfig{
+		Title: cfg.Title,
+		Limit: cfg.Limit,
+	}
+}
+
 func MergeColumnConfigs(defaultCfg, sectionCfg ColumnConfig) ColumnConfig {
 	colCfg := defaultCfg
 	if sectionCfg.Width != nil {

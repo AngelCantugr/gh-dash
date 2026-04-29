@@ -30,6 +30,8 @@ import (
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/notificationrow"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/notificationssection"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/notificationview"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/projectrow"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/projectsection"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/prrow"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/prssection"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/prview"
@@ -1072,6 +1074,11 @@ func (m *Model) updateSection(id int, sType string, msg tea.Msg) (cmd tea.Cmd) {
 	case issuessection.SectionType:
 		updatedSection, cmd = m.issues[id].Update(msg)
 		m.issues[id] = updatedSection
+	case projectsection.SectionType:
+		if id < len(m.projects) && m.projects[id] != nil {
+			updatedSection, cmd = m.projects[id].Update(msg)
+			m.projects[id] = updatedSection
+		}
 	}
 
 	currSection := m.getCurrSection()
@@ -1235,6 +1242,10 @@ func (m *Model) syncSidebar() tea.Cmd {
 		if m.prView.IsTextInputBoxFocused() {
 			m.sidebar.ScrollToBottom()
 		}
+	case *projectrow.Data:
+		// No drill-down for projects yet — clear the sidebar.
+		m.sidebar.SetContent("")
+		_ = row
 	case *data.IssueData:
 		m.issueSidebar.SetSectionId(m.currSectionId)
 		m.issueSidebar.SetRow(row)
@@ -1470,9 +1481,10 @@ func (m *Model) fetchAllViewSections() ([]section.Section, tea.Cmd) {
 		m.repo = &s
 		return nil, tea.Batch(cmds...)
 	case config.ProjectsView:
-		// Projects view: no data fetching yet — placeholder for PR #2
-		m.projects = []section.Section{}
-		return nil, tea.Batch(cmds...)
+		s, projectCmds := projectsection.FetchAllSections(m.ctx, m.projects)
+		cmds = append(cmds, projectCmds)
+		m.projects = s
+		return s, tea.Batch(cmds...)
 	case config.NotificationsView:
 		s, notifCmd := notificationssection.FetchAllSections(m.ctx, m.notifications)
 		cmds = append(cmds, notifCmd)
