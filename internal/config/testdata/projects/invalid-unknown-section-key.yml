@@ -1,0 +1,4 @@
+projectsSections:
+  - title: "Section with typo"
+    extarFields:
+      - Priority

@@ -48,5 +48,7 @@ formatters:
   settings:
     golines:
       chain-split-dots: true
+      max-len: 200
+      reformat-tags: false
   exclusions:
     generated: lax

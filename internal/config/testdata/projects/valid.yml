@@ -1,0 +1,27 @@
+projectsSections:
+  - title: "My Work"
+    owners:
+      - org:my-org
+      - user:alice
+    filters:
+      closed: false
+      titleContains: ""
+    extraFields:
+      - Priority
+      - Iteration
+    limit: 100
+    cache:
+      projectsTTL: 1h
+      itemsTTL: 5m
+  - title: "Org Roadmaps"
+    owners:
+      - org:platform-team
+    filters:
+      closed: false
+    extraFields:
+      - Priority
+cache:
+  enabled: true
+  dir: ""
+state:
+  enabled: true

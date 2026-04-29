@@ -1,0 +1,4 @@
+projectsSections:
+  - title: "Bad TTL"
+    cache:
+      projectsTTL: not-a-duration

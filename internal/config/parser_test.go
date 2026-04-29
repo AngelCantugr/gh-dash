@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/log/v2"
 	"github.com/google/go-cmp/cmp"
@@ -221,4 +222,91 @@ func setupConfigEnvVar(t *testing.T) func() {
 	return func() {
 		os.Unsetenv("GH_DASH_CONFIG")
 	}
+}
+
+func TestProjectsSections(t *testing.T) {
+	cwd := Testwd(t)
+
+	t.Run("Valid YAML parses into populated Config struct", func(t *testing.T) {
+		parsed, err := ParseConfig(Location{
+			ConfigFlag:       path.Join(cwd, "testdata/projects/valid.yml"),
+			SkipGlobalConfig: true,
+		})
+		require.NoError(t, err)
+		require.Len(t, parsed.ProjectsSections, 2)
+		require.Equal(t, "My Work", parsed.ProjectsSections[0].Title)
+		require.Len(t, parsed.ProjectsSections[0].Owners, 2)
+		require.Equal(t, OwnerKindOrg, parsed.ProjectsSections[0].Owners[0].Kind)
+		require.Equal(t, "my-org", parsed.ProjectsSections[0].Owners[0].Login)
+		require.Equal(t, OwnerKindUser, parsed.ProjectsSections[0].Owners[1].Kind)
+		require.Equal(t, "alice", parsed.ProjectsSections[0].Owners[1].Login)
+		require.Equal(t, Duration(1*time.Hour), parsed.ProjectsSections[0].Cache.ProjectsTTL)
+		require.Equal(t, Duration(5*time.Minute), parsed.ProjectsSections[0].Cache.ItemsTTL)
+		require.True(t, parsed.Cache.Enabled)
+		require.True(t, parsed.State.Enabled)
+	})
+
+	t.Run("Unknown top-level key returns parse error", func(t *testing.T) {
+		_, err := ParseConfig(Location{
+			ConfigFlag:       path.Join(cwd, "testdata/projects/invalid-unknown-top-level-key.yml"),
+			SkipGlobalConfig: true,
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "projcetSections")
+	})
+
+	t.Run("Unknown projectsSections field returns parse error", func(t *testing.T) {
+		_, err := ParseConfig(Location{
+			ConfigFlag:       path.Join(cwd, "testdata/projects/invalid-unknown-section-key.yml"),
+			SkipGlobalConfig: true,
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "extarFields")
+	})
+
+	t.Run("Bare owner login returns parse error", func(t *testing.T) {
+		_, err := ParseConfig(Location{
+			ConfigFlag:       path.Join(cwd, "testdata/projects/invalid-bare-owner.yml"),
+			SkipGlobalConfig: true,
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "my-org")
+	})
+
+	t.Run("Malformed TTL returns parse error", func(t *testing.T) {
+		_, err := ParseConfig(Location{
+			ConfigFlag:       path.Join(cwd, "testdata/projects/invalid-bad-ttl.yml"),
+			SkipGlobalConfig: true,
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "not-a-duration")
+	})
+
+	t.Run("Merge preserves projectsSections from user-provided config", func(t *testing.T) {
+		// Create a temp XDG config dir with the global config
+		tmpDir, err := os.MkdirTemp("", "gh-dash-projects-test")
+		require.NoError(t, err)
+		defer os.RemoveAll(tmpDir)
+
+		// Create the gh-dash config dir structure
+		dashDir := path.Join(tmpDir, "gh-dash")
+		require.NoError(t, os.MkdirAll(dashDir, 0o755))
+
+		// Copy global config to the temp dir
+		globalData, err := os.ReadFile(path.Join(cwd, "testdata/projects/global.yml"))
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(path.Join(dashDir, "config.yml"), globalData, 0o644))
+
+		os.Setenv("XDG_CONFIG_HOME", tmpDir)
+		defer os.Unsetenv("XDG_CONFIG_HOME")
+
+		parsed, err := ParseConfig(Location{
+			ConfigFlag: path.Join(cwd, "testdata/projects/repo-local.yml"),
+		})
+		require.NoError(t, err)
+		// Repo-local wins for projectsSections
+		require.Len(t, parsed.ProjectsSections, 1)
+		require.Equal(t, "Repo Section", parsed.ProjectsSections[0].Title)
+		require.Equal(t, "repo-org", parsed.ProjectsSections[0].Owners[0].Login)
+	})
 }

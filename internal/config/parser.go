@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
@@ -326,16 +327,124 @@ type ThemeConfig struct {
 	Icons  *IconThemeConfig  `yaml:"icons,omitempty"  validate:"omitempty"`
 }
 
+// OwnerKind identifies whether an owner reference is an organization or a user.
+type OwnerKind string
+
+const (
+	OwnerKindOrg  OwnerKind = "org"
+	OwnerKindUser OwnerKind = "user"
+)
+
+// OwnerRef holds a parsed "<kind>:<login>" owner string.
+// Bare logins (without the "kind:" prefix) are rejected at parse time.
+type OwnerRef struct {
+	Kind  OwnerKind
+	Login string
+}
+
+func (o *OwnerRef) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	return o.parseOwnerString(s)
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler so koanf's textUnmarshalerHookFunc
+// can decode YAML string values like "org:my-org" directly into OwnerRef structs.
+func (o *OwnerRef) UnmarshalText(b []byte) error {
+	return o.parseOwnerString(string(b))
+}
+
+func (o *OwnerRef) parseOwnerString(s string) error {
+	parts := strings.SplitN(s, ":", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return fmt.Errorf(
+			"owner %q must use <kind>:<login> format (e.g. org:my-org or user:alice); bare logins are not allowed",
+			s,
+		)
+	}
+	kind := OwnerKind(parts[0])
+	if kind != OwnerKindOrg && kind != OwnerKindUser {
+		return fmt.Errorf("unknown owner kind %q in %q; must be one of: org, user", parts[0], s)
+	}
+	o.Kind = kind
+	o.Login = parts[1]
+	return nil
+}
+
+// Duration is a time.Duration that unmarshals from a human-readable string
+// (e.g. "1h", "5m") via time.ParseDuration.
+type Duration time.Duration
+
+func (d Duration) MarshalJSON() ([]byte, error) {
+	return json.Marshal(time.Duration(d).String())
+}
+
+func (d *Duration) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	return d.parseDurationString(s)
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler so koanf's textUnmarshalerHookFunc
+// can decode YAML string values like "1h" or "5m" directly into Duration fields.
+func (d *Duration) UnmarshalText(b []byte) error {
+	return d.parseDurationString(string(b))
+}
+
+func (d *Duration) parseDurationString(s string) error {
+	dur, err := time.ParseDuration(s)
+	if err != nil {
+		return fmt.Errorf("invalid duration %q: %w", s, err)
+	}
+	*d = Duration(dur)
+	return nil
+}
+
+type ProjectFilters struct {
+	Closed        bool   `yaml:"closed"`
+	TitleContains string `yaml:"titleContains,omitempty"`
+}
+
+type ProjectCacheConfig struct {
+	ProjectsTTL Duration `yaml:"projectsTTL,omitempty"`
+	ItemsTTL    Duration `yaml:"itemsTTL,omitempty"`
+}
+
+type ProjectsSectionConfig struct {
+	Title       string             `yaml:"title"`
+	Owners      []OwnerRef         `yaml:"owners,omitempty"`
+	Filters     ProjectFilters     `yaml:"filters,omitempty"`
+	ExtraFields []string           `yaml:"extraFields,omitempty"`
+	Limit       *int               `yaml:"limit,omitempty"`
+	Cache       ProjectCacheConfig `yaml:"cache,omitempty"`
+}
+
+type CacheConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Dir     string `yaml:"dir,omitempty"`
+}
+
+type StateConfig struct {
+	Enabled bool `yaml:"enabled"`
+}
+
 type Config struct {
 	PRSections               []PrsSectionConfig           `yaml:"prSections"`
 	IssuesSections           []IssuesSectionConfig        `yaml:"issuesSections"`
 	NotificationsSections    []NotificationsSectionConfig `yaml:"notificationsSections"`
+	ProjectsSections         []ProjectsSectionConfig      `yaml:"projectsSections,omitempty"`
 	Repo                     RepoConfig                   `yaml:"repo,omitempty"`
 	Defaults                 Defaults                     `yaml:"defaults"`
 	Keybindings              Keybindings                  `yaml:"keybindings"`
 	RepoPaths                map[string]string            `yaml:"repoPaths"`
 	Theme                    *ThemeConfig                 `yaml:"theme,omitempty"           validate:"omitempty"`
 	Pager                    Pager                        `yaml:"pager"`
+	Cache                    CacheConfig                  `yaml:"cache,omitempty"`
+	State                    StateConfig                  `yaml:"state,omitempty"`
 	ConfirmQuit              bool                         `yaml:"confirmQuit"`
 	ShowAuthorIcons          bool                         `yaml:"showAuthorIcons,omitempty"`
 	SmartFilteringAtLaunch   bool                         `yaml:"smartFilteringAtLaunch"                         default:"true"`
@@ -508,6 +617,12 @@ func (parser ConfigParser) getDefaultConfig() Config {
 		ShowAuthorIcons:          true,
 		SmartFilteringAtLaunch:   true,
 		IncludeReadNotifications: true,
+		Cache: CacheConfig{
+			Enabled: true,
+		},
+		State: StateConfig{
+			Enabled: true,
+		},
 	}
 }
 
@@ -639,11 +754,103 @@ func (parser ConfigParser) getProvidedConfigPath(location Location) string {
 	return userProvidedCfgPath
 }
 
+// getAllowedKeys extracts the set of yaml field names from a struct type using reflection.
+func getAllowedKeys(t reflect.Type) map[string]bool {
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	allowed := make(map[string]bool, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		tag := field.Tag.Get("yaml")
+		if tag == "-" {
+			continue
+		}
+		name := strings.Split(tag, ",")[0]
+		if name == "" {
+			name = strings.ToLower(field.Name)
+		}
+		if name == "" {
+			continue
+		}
+		allowed[name] = true
+	}
+	return allowed
+}
+
+// validateKnownKeysNode checks a YAML mapping node against the yaml tags of struct type t.
+// Errors include the source file path and line number of the offending key.
+func validateKnownKeysNode(filePath string, node *yamlmarshaller.Node, t reflect.Type) error {
+	allowed := getAllowedKeys(t)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		keyNode := node.Content[i]
+		if !allowed[keyNode.Value] {
+			return fmt.Errorf("%s:%d: unknown configuration key %q", filePath, keyNode.Line, keyNode.Value)
+		}
+	}
+	return nil
+}
+
+// validateConfigFile reads the YAML file at filePath and validates that it
+// contains no unknown top-level or projectsSections-level keys.
+// koanf's StrictMerge does NOT reject unknown keys, so this is a pre-Unmarshal pass.
+func validateConfigFile(filePath string) error {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return err
+	}
+	var doc yamlmarshaller.Node
+	if err := yamlmarshaller.Unmarshal(data, &doc); err != nil {
+		return err
+	}
+	if doc.Kind == 0 || len(doc.Content) == 0 {
+		return nil
+	}
+
+	root := doc.Content[0]
+	if root.Kind != yamlmarshaller.MappingNode {
+		return nil
+	}
+
+	if err := validateKnownKeysNode(filePath, root, reflect.TypeOf(Config{})); err != nil {
+		return err
+	}
+
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		keyNode := root.Content[i]
+		valNode := root.Content[i+1]
+		if keyNode.Value != "projectsSections" {
+			continue
+		}
+		if valNode.Kind != yamlmarshaller.SequenceNode {
+			return fmt.Errorf("%s:%d: projectsSections must be a list", filePath, valNode.Line)
+		}
+		for j, sectionNode := range valNode.Content {
+			if sectionNode.Kind != yamlmarshaller.MappingNode {
+				continue
+			}
+			if err := validateKnownKeysNode(
+				filePath, sectionNode, reflect.TypeOf(ProjectsSectionConfig{}),
+			); err != nil {
+				return fmt.Errorf("projectsSections[%d]: %w", j, err)
+			}
+		}
+		break
+	}
+
+	return nil
+}
+
 func (parser ConfigParser) loadGlobalConfig(globalCfgPath string) error {
+	if err := validateConfigFile(globalCfgPath); err != nil {
+		return err
+	}
 	return parser.k.Load(file.Provider(globalCfgPath), yaml.Parser())
 }
 
-func (parser ConfigParser) mergeConfigs(globalCfgPath, userProvidedCfgPath string) (Config, error) {
+func (parser ConfigParser) mergeConfigs(
+	globalCfgPath, userProvidedCfgPath string,
+) (Config, error) {
 	if err := parser.loadGlobalConfig(globalCfgPath); err != nil {
 		return Config{}, parsingError{err: err, path: globalCfgPath}
 	}
@@ -667,6 +874,9 @@ func (parser ConfigParser) mergeConfigs(globalCfgPath, userProvidedCfgPath strin
 			dest["prSections"] = overridesCopy["prSections"]
 			dest["issuesSections"] = overridesCopy["issuesSections"]
 			dest["notificationsSections"] = overridesCopy["notificationsSections"]
+			if overridesCopy["projectsSections"] != nil {
+				dest["projectsSections"] = overridesCopy["projectsSections"]
+			}
 
 			return nil
 		}),
@@ -789,6 +999,9 @@ func ParseConfig(location Location) (Config, error) {
 
 	// For testing: skip global config and load only the provided config
 	if location.SkipGlobalConfig && userProvidedCfgPath != "" {
+		if err := validateConfigFile(userProvidedCfgPath); err != nil {
+			return Config{}, parsingError{path: userProvidedCfgPath, err: err}
+		}
 		if err := parser.k.Load(file.Provider(userProvidedCfgPath), yaml.Parser()); err != nil {
 			return Config{}, parsingError{path: userProvidedCfgPath, err: err}
 		}
@@ -802,6 +1015,9 @@ func ParseConfig(location Location) (Config, error) {
 	}
 
 	if userProvidedCfgPath != "" {
+		if err := validateConfigFile(userProvidedCfgPath); err != nil {
+			return Config{}, parsingError{path: userProvidedCfgPath, err: err}
+		}
 		mergedCfg, err := parser.mergeConfigs(globalCfgPath, userProvidedCfgPath)
 		if err != nil {
 			return Config{}, err
