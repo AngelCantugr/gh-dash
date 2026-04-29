@@ -1,9 +1,11 @@
 package data
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,13 +95,22 @@ func FetchProjects(
 }
 
 // ensureProjectsClient lazily initialises the shared package-level GraphQL client.
-// Does nothing if another function in the package has already set it.
+// Mirrors the FF_MOCK_DATA handling from prapi.go so the same mock server is used
+// across all data-layer functions when the flag is active.
 func ensureProjectsClient() error {
 	if client != nil {
 		return nil
 	}
 	var err error
-	client, err = gh.DefaultGraphQLClient()
+	if config.IsFeatureEnabled(config.FF_MOCK_DATA) {
+		log.Info("using mock data", "server", "https://localhost:3000")
+		http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{ //nolint:gosec
+			InsecureSkipVerify: true,
+		}
+		client, err = gh.NewGraphQLClient(gh.ClientOptions{Host: "localhost:3000", AuthToken: "fake-token"})
+	} else {
+		client, err = gh.DefaultGraphQLClient()
+	}
 	return err
 }
 
@@ -191,7 +202,7 @@ func fetchViewerProjects(cache *persistcache.Store) ([]ProjectData, error) {
 	}
 
 	// Viewer projects are attributed to a synthetic user owner with login "viewer".
-	viewerOwner := OwnerRef{Kind: OwnerUser, Login: "viewer"}
+	viewerOwner := OwnerRef{Kind: OwnerKindUser, Login: "viewer"}
 	projects := make([]ProjectData, 0, len(queryResult.Viewer.ProjectsV2.Nodes))
 	for _, n := range queryResult.Viewer.ProjectsV2.Nodes {
 		projects = append(projects, projectNodeToData(n, viewerOwner))
@@ -217,7 +228,7 @@ func fetchViewerProjects(cache *persistcache.Store) ([]ProjectData, error) {
 // fetchProjectNodesForOwner dispatches the correct GraphQL query shape for the owner kind.
 func fetchProjectNodesForOwner(owner OwnerRef) ([]projectNode, error) {
 	switch owner.Kind {
-	case OwnerOrg:
+	case OwnerKindOrg:
 		var queryResult struct {
 			Organization struct {
 				ProjectsV2 struct {
@@ -234,7 +245,7 @@ func fetchProjectNodesForOwner(owner OwnerRef) ([]projectNode, error) {
 		}
 		return queryResult.Organization.ProjectsV2.Nodes, nil
 
-	case OwnerUser:
+	case OwnerKindUser:
 		var queryResult struct {
 			User struct {
 				ProjectsV2 struct {
@@ -252,7 +263,7 @@ func fetchProjectNodesForOwner(owner OwnerRef) ([]projectNode, error) {
 		return queryResult.User.ProjectsV2.Nodes, nil
 
 	default:
-		return nil, fmt.Errorf("unknown owner kind: %d", owner.Kind)
+		return nil, fmt.Errorf("unknown owner kind: %s", owner.Kind)
 	}
 }
 
@@ -290,14 +301,10 @@ func applyProjectFilters(projects []ProjectData, filters ProjectFilters) []Proje
 }
 
 func ownerKindString(kind OwnerKind) string {
-	switch kind {
-	case OwnerOrg:
-		return "org"
-	case OwnerUser:
-		return "user"
-	default:
-		return "unknown"
+	if kind == OwnerKindOrg || kind == OwnerKindUser {
+		return string(kind)
 	}
+	return "unknown"
 }
 
 // fetchProjectsMockData returns canned fixture data from testdata/projects/ for development.

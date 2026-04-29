@@ -1,13 +1,18 @@
 package data
 
-import "time"
+import (
+	"time"
+
+	"github.com/dlvhdr/gh-dash/v4/internal/config"
+)
 
 // OwnerKind identifies whether an owner is an organization or an individual user.
-type OwnerKind int
+// Values match config.OwnerKind ("org" / "user") so callers can convert without loss.
+type OwnerKind = config.OwnerKind
 
 const (
-	OwnerOrg  OwnerKind = iota // organization
-	OwnerUser                  // user account
+	OwnerKindOrg  = config.OwnerKindOrg  // "org"
+	OwnerKindUser = config.OwnerKindUser // "user"
 )
 
 // OwnerRef identifies the owner whose projects should be queried.
