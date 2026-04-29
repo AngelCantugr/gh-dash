@@ -1,0 +1,38 @@
+[
+  {
+    "ID": "PVT_001",
+    "Number": "1",
+    "Title": "Q1 Roadmap",
+    "URL": "https://github.com/orgs/test/projects/1",
+    "Owner": {"Kind": 1, "Login": "viewer"},
+    "Closed": false,
+    "Public": true,
+    "ItemsCount": 10,
+    "OpenItemsCountLoaded": 0,
+    "UpdatedAt": "2024-01-15T10:00:00Z"
+  },
+  {
+    "ID": "PVT_002",
+    "Number": "2",
+    "Title": "Q2 Planning",
+    "URL": "https://github.com/orgs/test/projects/2",
+    "Owner": {"Kind": 1, "Login": "viewer"},
+    "Closed": true,
+    "Public": false,
+    "ItemsCount": 5,
+    "OpenItemsCountLoaded": 0,
+    "UpdatedAt": "2024-01-10T10:00:00Z"
+  },
+  {
+    "ID": "PVT_003",
+    "Number": "3",
+    "Title": "Backlog",
+    "URL": "https://github.com/orgs/test/projects/3",
+    "Owner": {"Kind": 1, "Login": "viewer"},
+    "Closed": false,
+    "Public": true,
+    "ItemsCount": 20,
+    "OpenItemsCountLoaded": 0,
+    "UpdatedAt": "2024-01-05T10:00:00Z"
+  }
+]
