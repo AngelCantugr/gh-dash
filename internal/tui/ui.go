@@ -1245,7 +1245,6 @@ func (m *Model) syncSidebar() tea.Cmd {
 	case *projectrow.Data:
 		// No drill-down for projects yet — clear the sidebar.
 		m.sidebar.SetContent("")
-		_ = row
 	case *data.IssueData:
 		m.issueSidebar.SetSectionId(m.currSectionId)
 		m.issueSidebar.SetRow(row)
