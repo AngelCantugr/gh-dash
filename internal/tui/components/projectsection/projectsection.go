@@ -23,8 +23,15 @@ const SectionType = "project"
 // adds a typed Projects slice for rendering.
 type Model struct {
 	section.BaseModel
-	Projects []projectrow.Data
-	cfg      config.ProjectsSectionConfig
+	Projects      []projectrow.Data
+	cfg           config.ProjectsSectionConfig
+	initialCursor int  // cursor restored from StateStore on first fetch
+	cursorApplied bool // true after initialCursor has been applied to the table
+}
+
+// sectionKey returns the state-store key used to persist this section's cursor.
+func (m *Model) sectionKey() string {
+	return fmt.Sprintf("projects/%d", m.Id)
 }
 
 // NewModel constructs a single projects section.
@@ -52,6 +59,15 @@ func NewModel(
 	m.Projects = []projectrow.Data{}
 	// Projects use structured filters, not a free-text search string
 	m.IsSearchSupported = false
+
+	// Restore cursor from session state so the user returns to their last position.
+	if ctx.StateStore != nil {
+		snap := ctx.StateStore.Snapshot()
+		key := fmt.Sprintf("projects/%d", id)
+		if ss, ok := snap.PerSection[key]; ok {
+			m.initialCursor = ss.Cursor
+		}
+	}
 
 	return m
 }
@@ -106,6 +122,11 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 			m.Table.SetRows(m.BuildRows())
 			m.Table.UpdateLastUpdated(time.Now())
 			m.UpdateTotalItemsCount(m.TotalCount)
+			// Restore cursor to the last persisted position on the first fetch.
+			if !m.cursorApplied && m.initialCursor > 0 {
+				m.Table.SetCurrItem(m.initialCursor)
+				m.cursorApplied = true
+			}
 		}
 	}
 
@@ -116,8 +137,15 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 	prompt, promptCmd := m.PromptConfirmationBox.Update(msg)
 	m.PromptConfirmationBox = prompt
 
+	prevCursor := m.Table.GetCurrItem()
 	tbl, tableCmd := m.Table.Update(msg)
 	m.Table = tbl
+	newCursor := m.Table.GetCurrItem()
+
+	// Persist cursor changes to disk (debounced 500ms by state.Store).
+	if m.Ctx.StateStore != nil && prevCursor != newCursor {
+		m.Ctx.StateStore.SetCursor(m.sectionKey(), newCursor)
+	}
 
 	return m, tea.Batch(cmd, searchCmd, promptCmd, tableCmd)
 }
@@ -221,7 +249,7 @@ func (m *Model) FetchNextPageSectionRows() []tea.Cmd {
 			TitleContains: filters.TitleContains,
 		}
 
-		projects, err := data.FetchProjects(nil, dataOwners, dataFilters)
+		projects, err := data.FetchProjects(m.Ctx.ProjectsCache, dataOwners, dataFilters)
 		if err != nil {
 			return constants.TaskFinishedMsg{
 				SectionId:   sectionId,

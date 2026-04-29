@@ -124,6 +124,17 @@ func (m *Model) GetCurrItem() int {
 	return m.rowsViewport.GetCurrItem()
 }
 
+// SetCurrItem positions the cursor at item n (0-indexed).
+// Resets to 0 first then advances, so the viewport scrolls correctly.
+// Safe to call before rows are loaded; the cursor will clamp to the last item.
+func (m *Model) SetCurrItem(n int) {
+	m.rowsViewport.ResetCurrItem()
+	for i := 0; i < n; i++ {
+		m.rowsViewport.NextItem()
+	}
+	m.SyncViewPortContent()
+}
+
 func (m *Model) PrevItem() int {
 	currItem := m.rowsViewport.PrevItem()
 	m.SyncViewPortContent()

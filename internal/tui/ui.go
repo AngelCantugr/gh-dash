@@ -21,6 +21,8 @@ import (
 	"github.com/dlvhdr/gh-dash/v4/internal/config"
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
 	"github.com/dlvhdr/gh-dash/v4/internal/git"
+	"github.com/dlvhdr/gh-dash/v4/internal/persistcache"
+	"github.com/dlvhdr/gh-dash/v4/internal/state"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/common"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/branch"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/branchsidebar"
@@ -82,6 +84,16 @@ func NewModel(location config.Location) Model {
 		version = info.Main.Version
 	}
 
+	stateStore, err := state.New()
+	if err != nil {
+		log.Warn("Failed to initialize session state store", "err", err)
+	}
+
+	projectsCache, err := persistcache.New()
+	if err != nil {
+		log.Warn("Failed to initialize projects cache", "err", err)
+	}
+
 	m.ctx = &context.ProgramContext{
 		RepoPath:   location.RepoPath,
 		ConfigFlag: location.ConfigFlag,
@@ -92,7 +104,9 @@ func NewModel(location config.Location) Model {
 			m.tasks[task.Id] = task
 			return m.taskSpinner.Tick
 		},
-		Theme: *theme.DefaultTheme,
+		Theme:         *theme.DefaultTheme,
+		StateStore:    stateStore,
+		ProjectsCache: projectsCache,
 	}
 
 	m.footer = footer.NewModel(m.ctx)
@@ -181,6 +195,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	)
 
 	switch msg := msg.(type) {
+	case tea.QuitMsg:
+		// Flush session state synchronously on graceful shutdown so the last
+		// cursor position is always written before the process exits.
+		if m.ctx.StateStore != nil {
+			m.ctx.StateStore.Flush()
+		}
+
 	case tea.KeyMsg:
 		log.Info("Key pressed", "key", msg.String())
 		m.ctx.Error = nil
