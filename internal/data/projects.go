@@ -19,8 +19,10 @@ import (
 	"github.com/dlvhdr/gh-dash/v4/internal/persistcache"
 )
 
-const projectsPageSize = 100
-const projectsCacheTTL = time.Hour
+const (
+	projectsPageSize = 100
+	projectsCacheTTL = time.Hour
+)
 
 // projectNode is the shape returned by GitHub's projectsV2 GraphQL nodes.
 // Explicit graphql tags on Id and Url avoid misgeneration from all-caps identifiers.
@@ -269,15 +271,15 @@ func fetchProjectNodesForOwner(owner OwnerRef) ([]projectNode, error) {
 
 func projectNodeToData(n projectNode, owner OwnerRef) ProjectData {
 	return ProjectData{
-		ID:        n.Id,
-		Number:    fmt.Sprintf("%d", n.Number),
-		Title:     n.Title,
-		URL:       n.Url,
-		Owner:     owner,
-		Closed:    n.Closed,
-		Public:    n.Public,
+		ID:         n.Id,
+		Number:     fmt.Sprintf("%d", n.Number),
+		Title:      n.Title,
+		URL:        n.Url,
+		Owner:      owner,
+		Closed:     n.Closed,
+		Public:     n.Public,
 		ItemsCount: n.Items.TotalCount,
-		UpdatedAt: n.UpdatedAt,
+		UpdatedAt:  n.UpdatedAt,
 	}
 }
 
