@@ -359,7 +359,10 @@ func (o *OwnerRef) UnmarshalText(b []byte) error {
 func (o *OwnerRef) parseOwnerString(s string) error {
 	parts := strings.SplitN(s, ":", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return fmt.Errorf("owner %q must use <kind>:<login> format (e.g. org:my-org or user:alice); bare logins are not allowed", s)
+		return fmt.Errorf(
+			"owner %q must use <kind>:<login> format (e.g. org:my-org or user:alice); bare logins are not allowed",
+			s,
+		)
 	}
 	kind := OwnerKind(parts[0])
 	if kind != OwnerKindOrg && kind != OwnerKindUser {
@@ -775,13 +778,14 @@ func getAllowedKeys(t reflect.Type) map[string]bool {
 	return allowed
 }
 
-// validateKnownKeys checks rawMap against the yaml tags of struct type t.
-// Returns an error listing the first unknown key found.
-func validateKnownKeys(rawMap map[string]interface{}, t reflect.Type) error {
+// validateKnownKeysNode checks a YAML mapping node against the yaml tags of struct type t.
+// Errors include the source file path and line number of the offending key.
+func validateKnownKeysNode(filePath string, node *yamlmarshaller.Node, t reflect.Type) error {
 	allowed := getAllowedKeys(t)
-	for key := range rawMap {
-		if !allowed[key] {
-			return fmt.Errorf("unknown configuration key %q", key)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		keyNode := node.Content[i]
+		if !allowed[keyNode.Value] {
+			return fmt.Errorf("%s:%d: unknown configuration key %q", filePath, keyNode.Line, keyNode.Value)
 		}
 	}
 	return nil
@@ -795,29 +799,43 @@ func validateConfigFile(filePath string) error {
 	if err != nil {
 		return err
 	}
-	var rawMap map[string]interface{}
-	if err := yamlmarshaller.Unmarshal(data, &rawMap); err != nil {
+	var doc yamlmarshaller.Node
+	if err := yamlmarshaller.Unmarshal(data, &doc); err != nil {
+		return err
+	}
+	if doc.Kind == 0 || len(doc.Content) == 0 {
+		return nil
+	}
+
+	root := doc.Content[0]
+	if root.Kind != yamlmarshaller.MappingNode {
+		return nil
+	}
+
+	if err := validateKnownKeysNode(filePath, root, reflect.TypeOf(Config{})); err != nil {
 		return err
 	}
 
-	if err := validateKnownKeys(rawMap, reflect.TypeOf(Config{})); err != nil {
-		return fmt.Errorf("in %s: %w", filePath, err)
-	}
-
-	if ps, ok := rawMap["projectsSections"]; ok {
-		sections, ok := ps.([]interface{})
-		if !ok {
-			return fmt.Errorf("in %s: projectsSections must be a list", filePath)
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		keyNode := root.Content[i]
+		valNode := root.Content[i+1]
+		if keyNode.Value != "projectsSections" {
+			continue
 		}
-		for i, section := range sections {
-			sectionMap, ok := section.(map[string]interface{})
-			if !ok {
+		if valNode.Kind != yamlmarshaller.SequenceNode {
+			return fmt.Errorf("%s:%d: projectsSections must be a list", filePath, valNode.Line)
+		}
+		for j, sectionNode := range valNode.Content {
+			if sectionNode.Kind != yamlmarshaller.MappingNode {
 				continue
 			}
-			if err := validateKnownKeys(sectionMap, reflect.TypeOf(ProjectsSectionConfig{})); err != nil {
-				return fmt.Errorf("in %s: projectsSections[%d]: %w", filePath, i, err)
+			if err := validateKnownKeysNode(
+				filePath, sectionNode, reflect.TypeOf(ProjectsSectionConfig{}),
+			); err != nil {
+				return fmt.Errorf("projectsSections[%d]: %w", j, err)
 			}
 		}
+		break
 	}
 
 	return nil
@@ -830,7 +848,9 @@ func (parser ConfigParser) loadGlobalConfig(globalCfgPath string) error {
 	return parser.k.Load(file.Provider(globalCfgPath), yaml.Parser())
 }
 
-func (parser ConfigParser) mergeConfigs(globalCfgPath, userProvidedCfgPath string) (Config, error) {
+func (parser ConfigParser) mergeConfigs(
+	globalCfgPath, userProvidedCfgPath string,
+) (Config, error) {
 	if err := parser.loadGlobalConfig(globalCfgPath); err != nil {
 		return Config{}, parsingError{err: err, path: globalCfgPath}
 	}
