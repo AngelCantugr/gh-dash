@@ -724,6 +724,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			log.Error("failed enriching pr", "err", msg.Err)
 		}
 
+	case issueview.IssueHydratedMsg:
+		m.issueSidebar.SetRow(&msg.Issue)
+		syncCmd := m.syncSidebar()
+		cmds = append(cmds, syncCmd)
+
+	case issueview.IssueHydrateErrMsg:
+		log.Error("failed hydrating issue", "err", msg.Err)
+
 	case notificationPRFetchedMsg:
 		if msg.Err == nil {
 			// Convert enriched PR to prrow.Data for display

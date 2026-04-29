@@ -583,6 +583,17 @@ func (m *Model) EnrichCurrRow() tea.Cmd {
 	}
 }
 
+// OpenByURL prepares the sidebar to display a PR identified by URL.
+// It constructs a minimal stub row with the URL set, sets it on the model,
+// and returns a tea.Cmd that fires the existing EnrichCurrRow enrichment flow
+// (which calls data.FetchPullRequest(url) asynchronously).
+func (m *Model) OpenByURL(url string) tea.Cmd {
+	stub := &data.PullRequestData{Url: url}
+	row := prrow.Data{Primary: stub, IsEnriched: false}
+	m.SetRow(&row)
+	return m.EnrichCurrRow()
+}
+
 func (m *Model) SetWidth(width int) {
 	m.width = width
 	m.carousel.SetWidth(width)
