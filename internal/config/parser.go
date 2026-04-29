@@ -69,6 +69,10 @@ func (a *ViewType) UnmarshalJSON(b []byte) error {
 		*a = IssuesView
 	case "repo":
 		*a = RepoView
+	case "projects":
+		*a = ProjectsView
+	default:
+		return fmt.Errorf("unknown view type: %q (valid values: notifications, prs, issues, repo, projects)", s)
 	}
 
 	return nil
@@ -79,6 +83,7 @@ const (
 	PRsView           ViewType = "prs"
 	IssuesView        ViewType = "issues"
 	RepoView          ViewType = "repo"
+	ProjectsView      ViewType = "projects"
 )
 
 type SectionConfig struct {
@@ -231,6 +236,7 @@ type Keybindings struct {
 	Prs           []Keybinding `yaml:"prs,omitempty"`
 	Branches      []Keybinding `yaml:"branches,omitempty"`
 	Notifications []Keybinding `yaml:"notifications,omitempty"`
+	Projects      []Keybinding `yaml:"projects,omitempty"`
 }
 
 type Pager struct {
@@ -817,6 +823,11 @@ func (parser ConfigParser) unmarshalConfigWithDefaults() (Config, error) {
 
 	repoFF := IsFeatureEnabled(FF_REPO_VIEW)
 	if cfg.Defaults.View == RepoView && !repoFF {
+		cfg.Defaults.View = PRsView
+	}
+
+	projectsFF := IsFeatureEnabled(FF_PROJECTS_VIEW)
+	if cfg.Defaults.View == ProjectsView && !projectsFF {
 		cfg.Defaults.View = PRsView
 	}
 
