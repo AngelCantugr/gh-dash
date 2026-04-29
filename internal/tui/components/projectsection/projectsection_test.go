@@ -27,14 +27,14 @@ func newTestCtx() *context.ProgramContext {
 func newTestModel() Model {
 	ctx := newTestCtx()
 	project := &data.ProjectData{
-		ID:        "PVT_1",
-		Number:    "1",
-		Title:     "Test Project",
-		URL:       "https://github.com/orgs/acme/projects/1",
-		Owner:     data.OwnerRef{Kind: "org", Login: "acme"},
-		Closed:    false,
+		ID:         "PVT_1",
+		Number:     "1",
+		Title:      "Test Project",
+		URL:        "https://github.com/orgs/acme/projects/1",
+		Owner:      data.OwnerRef{Kind: "org", Login: "acme"},
+		Closed:     false,
 		ItemsCount: 5,
-		UpdatedAt: time.Now(),
+		UpdatedAt:  time.Now(),
 	}
 	m := Model{
 		BaseModel: section.BaseModel{
