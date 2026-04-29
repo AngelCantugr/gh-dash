@@ -6,10 +6,10 @@
 # not a block; the decision field controls the gate.
 set -uo pipefail
 
-output=$(task fmt && \
-         task lint && \
-         go build ./... && \
-         task test ./... 2>&1) || {
+output=$( (task fmt && \
+          task lint && \
+          go build ./... && \
+          task test ./...) 2>&1) || {
   jq -n --arg r "CI gate failed. Fix all issues before finishing:
 
 $output" '{"decision":"block","reason":$r}'
