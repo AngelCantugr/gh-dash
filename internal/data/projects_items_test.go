@@ -245,18 +245,29 @@ func makeFieldNode(id, name, kind string, opts []gqlFieldOption) gqlFieldNode {
 	switch kind {
 	case "single_select":
 		return gqlFieldNode{
-			TypeName:       "ProjectV2SingleSelectField",
-			AsSingleSelect: struct{ Id string `graphql:"id"`; Name string; Options []gqlFieldOption }{Id: id, Name: name, Options: opts},
+			TypeName: "ProjectV2SingleSelectField",
+			AsSingleSelect: struct {
+				Id      string `graphql:"id"`
+				Name    string
+				Options []gqlFieldOption
+			}{Id: id, Name: name, Options: opts},
 		}
 	case "iteration":
 		return gqlFieldNode{
-			TypeName:    "ProjectV2IterationField",
-			AsIteration: struct{ Id string `graphql:"id"`; Name string }{Id: id, Name: name},
+			TypeName: "ProjectV2IterationField",
+			AsIteration: struct {
+				Id   string `graphql:"id"`
+				Name string
+			}{Id: id, Name: name},
 		}
 	default:
 		return gqlFieldNode{
 			TypeName: "ProjectV2Field",
-			AsField:  struct{ Id string `graphql:"id"`; Name string; DataType string }{Id: id, Name: name, DataType: "TEXT"},
+			AsField: struct {
+				Id       string `graphql:"id"`
+				Name     string
+				DataType string
+			}{Id: id, Name: name, DataType: "TEXT"},
 		}
 	}
 }

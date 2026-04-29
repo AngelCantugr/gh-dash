@@ -336,8 +336,8 @@ type gqlFieldOption struct {
 
 // gqlFieldNode represents a ProjectV2FieldConfiguration union node.
 type gqlFieldNode struct {
-	TypeName      string `graphql:"__typename"`
-	AsField       struct {
+	TypeName string `graphql:"__typename"`
+	AsField  struct {
 		Id       string `graphql:"id"`
 		Name     string
 		DataType string
@@ -355,9 +355,9 @@ type gqlFieldNode struct {
 
 // gqlFieldValueNode represents a ProjectV2ItemFieldValue union node.
 type gqlFieldValueNode struct {
-	TypeName      string `graphql:"__typename"`
+	TypeName       string `graphql:"__typename"`
 	AsSingleSelect struct {
-		Field   gqlFieldRef
+		Field    gqlFieldRef
 		OptionId string
 		Name     string
 	} `graphql:"... on ProjectV2ItemFieldSingleSelectValue"`
@@ -388,17 +388,17 @@ type gqlItemNode struct {
 	ItemType string `graphql:"type"`
 	Content  struct {
 		AsIssue struct {
-			Title  string
-			Number int
-			Url    string `graphql:"url"`
+			Title      string
+			Number     int
+			Url        string `graphql:"url"`
 			Repository struct {
 				NameWithOwner string
 			}
 		} `graphql:"... on Issue"`
 		AsPR struct {
-			Title  string
-			Number int
-			Url    string `graphql:"url"`
+			Title      string
+			Number     int
+			Url        string `graphql:"url"`
 			Repository struct {
 				NameWithOwner string
 			}
@@ -435,10 +435,6 @@ func FetchProjectItems(
 		return fetchProjectItemsMockData(projectID)
 	}
 
-	if err := ensureProjectsClient(); err != nil {
-		return ProjectSchema{}, nil, PageInfo{}, fmt.Errorf("FetchProjectItems: init client: %w", err)
-	}
-
 	cacheKey := fmt.Sprintf("project-items/%s", projectID)
 	isFirstPage := after == ""
 
@@ -456,6 +452,10 @@ func FetchProjectItems(
 				return cached.Schema, cached.Items, cached.PageInfo, nil
 			}
 		}
+	}
+
+	if err := ensureProjectsClient(); err != nil {
+		return ProjectSchema{}, nil, PageInfo{}, fmt.Errorf("FetchProjectItems: init client: %w", err)
 	}
 
 	// Load-more: read existing items from cache to stitch with the new page.

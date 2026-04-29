@@ -50,7 +50,7 @@ type ProjectData struct {
 type ItemType int
 
 const (
-	ItemTypeIssue       ItemType = iota
+	ItemTypeIssue ItemType = iota
 	ItemTypePullRequest
 	ItemTypeDraftIssue
 	ItemTypeRedacted
