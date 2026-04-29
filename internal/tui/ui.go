@@ -717,12 +717,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case prview.EnrichedPrMsg:
 		if msg.Err == nil {
 			m.prView.SetEnrichedPR(msg.Data)
-			m.prs[msg.Id].(*prssection.Model).EnrichPR(msg.Data)
+			if msg.Id >= 0 && msg.Id < len(m.prs) {
+				m.prs[msg.Id].(*prssection.Model).EnrichPR(msg.Data)
+			}
 			syncCmd := m.syncSidebar()
 			cmds = append(cmds, syncCmd)
 		} else {
 			log.Error("failed enriching pr", "err", msg.Err)
 		}
+
+	case issueview.IssueHydratedMsg:
+		m.issueSidebar.SetRow(&msg.Issue)
+		syncCmd := m.syncSidebar()
+		cmds = append(cmds, syncCmd)
+
+	case issueview.IssueHydrateErrMsg:
+		log.Error("failed hydrating issue", "err", msg.Err)
 
 	case notificationPRFetchedMsg:
 		if msg.Err == nil {

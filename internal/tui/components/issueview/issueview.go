@@ -268,6 +268,31 @@ func (m *Model) SetRow(data *data.IssueData) {
 	}
 }
 
+// IssueHydratedMsg is emitted by OpenByURL when the issue has been fetched
+// successfully and the sidebar should be populated.
+type IssueHydratedMsg struct {
+	Issue data.IssueData
+}
+
+// IssueHydrateErrMsg is emitted by OpenByURL when fetching the issue fails.
+type IssueHydrateErrMsg struct {
+	Err error
+}
+
+// OpenByURL fetches the issue at the given GitHub URL and populates the
+// sidebar. It wraps the existing data.FetchIssue helper and returns a
+// tea.Cmd that emits IssueHydratedMsg (or IssueHydrateErrMsg on failure),
+// consumed by the root Update loop.
+func (m *Model) OpenByURL(url string) tea.Cmd {
+	return func() tea.Msg {
+		issue, err := data.FetchIssue(url)
+		if err != nil {
+			return IssueHydrateErrMsg{Err: err}
+		}
+		return IssueHydratedMsg{Issue: issue}
+	}
+}
+
 func (m *Model) IsTextInputBoxFocused() bool {
 	return m.editor.Active()
 }
