@@ -73,6 +73,7 @@ func NewModel(
 		"Fetching project items...",
 		true,
 	)
+
 	si := textinput.New()
 	si.Placeholder = "Search by title..."
 	si.Prompt = " / "
