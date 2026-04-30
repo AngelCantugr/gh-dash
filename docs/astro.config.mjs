@@ -7,9 +7,9 @@ export default defineConfig({
     starlight({
       title: 'gh-dash',
       description: 'A terminal dashboard for GitHub PRs, issues, and notifications.',
-      social: {
-        github: 'https://github.com/dlvhdr/gh-dash',
-      },
+      social: [
+        { icon: 'github', label: 'GitHub', href: 'https://github.com/dlvhdr/gh-dash' },
+      ],
       sidebar: [
         {
           label: 'Overview',
