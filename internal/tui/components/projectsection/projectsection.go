@@ -143,6 +143,7 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 					proj.Primary.URL, // projectID — used as cache key
 					proj.Primary.Title,
 					proj.Primary.URL,
+					m.cfg.ExtraFields,
 				)
 				m.itemsView = iv
 				m.isDrilledDown = true

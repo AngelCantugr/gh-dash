@@ -25,16 +25,17 @@ import (
 // It renders project items in a table and manages its own fetch/pagination
 // lifecycle. It does NOT implement section.Section.
 type Model struct {
-	ctx          *context.ProgramContext
-	projectID    string
-	projectTitle string
-	projectURL   string
-	schema       *data.ProjectSchema
-	items        []data.ProjectItemData
-	pageInfo     *data.PageInfo
-	table        table.Model
-	isFetching   bool
-	sectionId    int
+	ctx             *context.ProgramContext
+	projectID       string
+	projectTitle    string
+	projectURL      string
+	extraFieldNames []string
+	schema          *data.ProjectSchema
+	items           []data.ProjectItemData
+	pageInfo        *data.PageInfo
+	table           table.Model
+	isFetching      bool
+	sectionId       int
 	// search state
 	isSearching bool
 	searchQuery string
@@ -55,6 +56,7 @@ func NewModel(
 	ctx *context.ProgramContext,
 	sectionId int,
 	projectID, projectTitle, projectURL string,
+	extraFieldNames []string,
 ) *Model {
 	dims := constants.Dimensions{
 		Width:  ctx.MainContentWidth,
@@ -79,13 +81,14 @@ func NewModel(
 	si.Prompt = " / "
 	si.Blur()
 	return &Model{
-		ctx:          ctx,
-		projectID:    projectID,
-		projectTitle: projectTitle,
-		projectURL:   projectURL,
-		sectionId:    sectionId,
-		table:        tbl,
-		searchInput:  si,
+		ctx:             ctx,
+		projectID:       projectID,
+		projectTitle:    projectTitle,
+		projectURL:      projectURL,
+		extraFieldNames: extraFieldNames,
+		sectionId:       sectionId,
+		table:           tbl,
+		searchInput:     si,
 	}
 }
 
@@ -156,6 +159,7 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		} else {
 			m.items = msg.Items
 		}
+		m.table.Columns = BuildColumns(m.schema, m.items)
 		m.table.SetRows(BuildRows(m.ctx, m.filteredItems(), m.schema))
 		m.table.SetIsLoading(false)
 	}
@@ -214,6 +218,7 @@ func (m *Model) FetchItems(appendMode bool) tea.Cmd {
 
 	// Capture values for the closure — avoid capturing m directly.
 	projectID := m.projectID
+	extraFieldNames := m.extraFieldNames
 	var cache *persistcache.Store
 	if m.ctx != nil {
 		cache = m.ctx.ProjectsCache
@@ -225,7 +230,7 @@ func (m *Model) FetchItems(appendMode bool) tea.Cmd {
 			projectID,
 			after,
 			100,
-			nil,
+			extraFieldNames,
 		)
 		return ProjectItemsFetchedMsg{
 			Schema:   schema,
