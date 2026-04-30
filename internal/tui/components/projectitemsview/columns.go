@@ -1,6 +1,11 @@
 package projectitemsview
 
 import (
+	"fmt"
+	"strconv"
+	"time"
+	"unicode/utf8"
+
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/table"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/context"
@@ -12,6 +17,8 @@ var (
 	colWidthRepo    = 20
 	colWidthStatus  = 16
 	colWidthUpdated = 12
+
+	colWidthExtraMin = 8
 
 	growTrue = true
 )
@@ -25,6 +32,46 @@ func GetColumns() []table.Column {
 		{Title: "Status", Width: &colWidthStatus},
 		{Title: "Updated", Width: &colWidthUpdated},
 	}
+}
+
+// BuildColumns returns the full column set for the drill-down table.
+// Base columns are always present in fixed order; extras follow in
+// YAML-declared order. Widths for extra columns are computed from observed values.
+func BuildColumns(schema *data.ProjectSchema, observed []data.ProjectItemData) []table.Column {
+	cols := GetColumns()
+	if schema == nil {
+		return cols
+	}
+	for _, fieldID := range schema.ExtraFieldOrder {
+		def, ok := schema.ExtraFields[fieldID]
+		if !ok {
+			continue
+		}
+		w := computeExtraWidth(fieldID, def, schema, observed)
+		wCopy := w
+		cols = append(cols, table.Column{
+			Title: def.Name,
+			Width: &wCopy,
+		})
+	}
+	return cols
+}
+
+// computeExtraWidth returns the column width for an extra field: the maximum
+// of the header title width, the widest rendered value among observed items,
+// and the minimum extra column width.
+func computeExtraWidth(fieldID string, def data.FieldDef, schema *data.ProjectSchema, observed []data.ProjectItemData) int {
+	w := utf8.RuneCountInString(def.Name)
+	if w < colWidthExtraMin {
+		w = colWidthExtraMin
+	}
+	for _, item := range observed {
+		cell := renderExtraField(fieldID, item, schema)
+		if cw := utf8.RuneCountInString(cell); cw > w {
+			w = cw
+		}
+	}
+	return w
 }
 
 // BuildRows converts ProjectItemData slice to table.Row slice for rendering.
@@ -52,9 +99,90 @@ func buildRow(ctx *context.ProgramContext, item data.ProjectItemData, schema *da
 	statusStr := renderStatus(item, schema)
 	updatedStr := renderUpdated(ctx, item)
 
-	return table.Row{title, typeStr, repoStr, statusStr, updatedStr}
+	row := table.Row{title, typeStr, repoStr, statusStr, updatedStr}
+
+	if schema != nil {
+		for _, fieldID := range schema.ExtraFieldOrder {
+			if _, ok := schema.ExtraFields[fieldID]; !ok {
+				row = append(row, "—")
+				continue
+			}
+			row = append(row, renderExtraField(fieldID, item, schema))
+		}
+	}
+
+	return row
 }
 
+// renderExtraField renders the value of an extra field for a given item.
+// Returns "—" for missing values, schema-drift, or unsupported types.
+func renderExtraField(fieldID string, item data.ProjectItemData, schema *data.ProjectSchema) string {
+	// Schema-drift guard: if schema is provided and field ID is not in it, render "—".
+	if schema != nil {
+		if _, ok := schema.ExtraFields[fieldID]; !ok {
+			return "—"
+		}
+	}
+
+	fv, ok := item.Fields[fieldID]
+	if !ok {
+		return "—"
+	}
+
+	switch v := fv.(type) {
+	case data.FieldValueSingleSelect:
+		return v.Name
+	case data.FieldValueNumber:
+		return formatNumber(v.Number)
+	case data.FieldValueDate:
+		return renderDateValue(v.Date)
+	case data.FieldValueIteration:
+		return renderIterationValue(v)
+	case data.FieldValueText:
+		return v.Text
+	default:
+		return "—"
+	}
+}
+
+// formatNumber renders a float64 without a trailing ".0" when the value is
+// an integer, e.g. 42 → "42", 3.14 → "3.14".
+func formatNumber(n float64) string {
+	if n == float64(int64(n)) {
+		return strconv.FormatInt(int64(n), 10)
+	}
+	return strconv.FormatFloat(n, 'f', -1, 64)
+}
+
+// renderDateValue parses an ISO-8601 date string and returns "YYYY-MM-DD".
+// Falls back to the raw string if it cannot be parsed.
+func renderDateValue(raw string) string {
+	// GitHub returns dates as "YYYY-MM-DD" or "YYYY-MM-DDTHH:MM:SSZ".
+	for _, layout := range []string{"2006-01-02T15:04:05Z", "2006-01-02"} {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t.Format("2006-01-02")
+		}
+	}
+	return raw
+}
+
+// renderIterationValue formats an iteration as "Title (MMM D → MMM D)".
+// StartDate is "YYYY-MM-DD"; Duration is in days (total length, inclusive).
+// E.g. start=Apr 22, duration=14 → end=May 5 (Apr 22 is day 1, May 5 is day 14).
+func renderIterationValue(v data.FieldValueIteration) string {
+	start, err := time.Parse("2006-01-02", v.StartDate)
+	if err != nil {
+		// Fallback: just the title.
+		return v.Title
+	}
+	// Duration is total days inclusive, so last day = start + (duration-1) days.
+	end := start.AddDate(0, 0, v.Duration-1)
+	startFmt := fmt.Sprintf("%s %d", start.Format("Jan"), start.Day())
+	endFmt := fmt.Sprintf("%s %d", end.Format("Jan"), end.Day())
+	return fmt.Sprintf("%s (%s → %s)", v.Title, startFmt, endFmt)
+}
+
+// renderItemType converts an ItemType to a display string.
 func renderItemType(t data.ItemType) string {
 	switch t {
 	case data.ItemTypeIssue:

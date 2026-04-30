@@ -161,6 +161,203 @@ func TestGetColumns_Count(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// BuildColumns
+// ---------------------------------------------------------------------------
+
+func TestBuildColumns_NilSchema_ReturnsBaseOnly(t *testing.T) {
+	cols := BuildColumns(nil, nil)
+	require.Len(t, cols, 5)
+}
+
+func TestBuildColumns_EmptyExtraFieldOrder_ReturnsBaseOnly(t *testing.T) {
+	schema := &data.ProjectSchema{
+		ExtraFields:     map[string]data.FieldDef{},
+		ExtraFieldOrder: []string{},
+	}
+	cols := BuildColumns(schema, nil)
+	require.Len(t, cols, 5)
+}
+
+func TestBuildColumns_ExtraColumnsAppendedInYAMLOrder(t *testing.T) {
+	schema := &data.ProjectSchema{
+		ExtraFields: map[string]data.FieldDef{
+			"FIELD_PRIO": {ID: "FIELD_PRIO", Name: "Priority"},
+			"FIELD_ITER": {ID: "FIELD_ITER", Name: "Iteration"},
+		},
+		ExtraFieldOrder: []string{"FIELD_PRIO", "FIELD_ITER"},
+	}
+	cols := BuildColumns(schema, nil)
+	require.Len(t, cols, 7)
+	require.Equal(t, "Priority", cols[5].Title)
+	require.Equal(t, "Iteration", cols[6].Title)
+	require.NotNil(t, cols[5].Width)
+	require.NotNil(t, cols[6].Width)
+}
+
+func TestBuildColumns_WidthAtLeastHeaderLength(t *testing.T) {
+	schema := &data.ProjectSchema{
+		ExtraFields: map[string]data.FieldDef{
+			"FIELD_X": {ID: "FIELD_X", Name: "LongHeaderName"},
+		},
+		ExtraFieldOrder: []string{"FIELD_X"},
+	}
+	cols := BuildColumns(schema, nil)
+	require.Len(t, cols, 6)
+	require.GreaterOrEqual(t, *cols[5].Width, len("LongHeaderName"))
+}
+
+func TestBuildColumns_SchemaDriftFieldIDSkipped(t *testing.T) {
+	// ExtraFieldOrder references a field ID not in ExtraFields map.
+	schema := &data.ProjectSchema{
+		ExtraFields:     map[string]data.FieldDef{},
+		ExtraFieldOrder: []string{"FIELD_GONE"},
+	}
+	cols := BuildColumns(schema, nil)
+	// drift field is skipped — only base columns returned
+	require.Len(t, cols, 5)
+}
+
+func TestBuildColumns_WidthGrowsWithObservedValues(t *testing.T) {
+	schema := &data.ProjectSchema{
+		ExtraFields: map[string]data.FieldDef{
+			"FIELD_T": {ID: "FIELD_T", Name: "Tag"},
+		},
+		ExtraFieldOrder: []string{"FIELD_T"},
+	}
+	observed := []data.ProjectItemData{
+		{
+			Fields: data.FieldValues{
+				"FIELD_T": data.FieldValueText{Text: "a very long text value indeed"},
+			},
+		},
+	}
+	cols := BuildColumns(schema, observed)
+	require.Len(t, cols, 6)
+	require.GreaterOrEqual(t, *cols[5].Width, len("a very long text value indeed"))
+}
+
+// ---------------------------------------------------------------------------
+// renderExtraField
+// ---------------------------------------------------------------------------
+
+func TestRenderExtraField_MissingFromItem_ReturnsDash(t *testing.T) {
+	item := data.ProjectItemData{Fields: data.FieldValues{}}
+	result := renderExtraField("FIELD_X", item, nil)
+	require.Equal(t, "—", result)
+}
+
+func TestRenderExtraField_SchemaDriftGuard_ReturnsDash(t *testing.T) {
+	schema := &data.ProjectSchema{
+		ExtraFields: map[string]data.FieldDef{},
+	}
+	item := data.ProjectItemData{
+		Fields: data.FieldValues{
+			"FIELD_X": data.FieldValueText{Text: "should not render"},
+		},
+	}
+	result := renderExtraField("FIELD_X", item, schema)
+	require.Equal(t, "—", result)
+}
+
+func TestRenderExtraField_SingleSelect(t *testing.T) {
+	item := data.ProjectItemData{
+		Fields: data.FieldValues{
+			"FIELD_SS": data.FieldValueSingleSelect{Name: "High"},
+		},
+	}
+	result := renderExtraField("FIELD_SS", item, nil)
+	require.Equal(t, "High", result)
+}
+
+func TestRenderExtraField_NumberInteger(t *testing.T) {
+	item := data.ProjectItemData{
+		Fields: data.FieldValues{
+			"FIELD_N": data.FieldValueNumber{Number: 42},
+		},
+	}
+	result := renderExtraField("FIELD_N", item, nil)
+	require.Equal(t, "42", result)
+}
+
+func TestRenderExtraField_NumberFloat(t *testing.T) {
+	item := data.ProjectItemData{
+		Fields: data.FieldValues{
+			"FIELD_N": data.FieldValueNumber{Number: 3.14},
+		},
+	}
+	result := renderExtraField("FIELD_N", item, nil)
+	require.Equal(t, "3.14", result)
+}
+
+func TestRenderExtraField_Date(t *testing.T) {
+	item := data.ProjectItemData{
+		Fields: data.FieldValues{
+			"FIELD_D": data.FieldValueDate{Date: "2024-04-22"},
+		},
+	}
+	result := renderExtraField("FIELD_D", item, nil)
+	require.Equal(t, "2024-04-22", result)
+}
+
+func TestRenderExtraField_DateWithTimestamp(t *testing.T) {
+	item := data.ProjectItemData{
+		Fields: data.FieldValues{
+			"FIELD_D": data.FieldValueDate{Date: "2024-04-22T00:00:00Z"},
+		},
+	}
+	result := renderExtraField("FIELD_D", item, nil)
+	require.Equal(t, "2024-04-22", result)
+}
+
+func TestRenderExtraField_Iteration(t *testing.T) {
+	item := data.ProjectItemData{
+		Fields: data.FieldValues{
+			"FIELD_I": data.FieldValueIteration{
+				Title:     "Sprint 4",
+				StartDate: "2024-04-22",
+				Duration:  14,
+			},
+		},
+	}
+	result := renderExtraField("FIELD_I", item, nil)
+	require.Equal(t, "Sprint 4 (Apr 22 → May 5)", result)
+}
+
+func TestRenderExtraField_IterationBadStartDate_FallsBackToTitle(t *testing.T) {
+	item := data.ProjectItemData{
+		Fields: data.FieldValues{
+			"FIELD_I": data.FieldValueIteration{
+				Title:     "Q2",
+				StartDate: "not-a-date",
+				Duration:  90,
+			},
+		},
+	}
+	result := renderExtraField("FIELD_I", item, nil)
+	require.Equal(t, "Q2", result)
+}
+
+func TestRenderExtraField_Text(t *testing.T) {
+	item := data.ProjectItemData{
+		Fields: data.FieldValues{
+			"FIELD_TXT": data.FieldValueText{Text: "hello world"},
+		},
+	}
+	result := renderExtraField("FIELD_TXT", item, nil)
+	require.Equal(t, "hello world", result)
+}
+
+func TestRenderExtraField_Unknown_ReturnsDash(t *testing.T) {
+	item := data.ProjectItemData{
+		Fields: data.FieldValues{
+			"FIELD_U": data.FieldValueUnknown{},
+		},
+	}
+	result := renderExtraField("FIELD_U", item, nil)
+	require.Equal(t, "—", result)
+}
+
+// ---------------------------------------------------------------------------
 // filteredItems (AC #9 — client-side title search)
 // ---------------------------------------------------------------------------
 
