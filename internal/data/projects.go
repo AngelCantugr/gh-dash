@@ -996,15 +996,14 @@ func UpdateItemStatus(
 		}
 	}
 
+	newValue := "(cleared)"
+	if optionID != nil {
+		newValue = *optionID
+	}
 	log.Debug("UpdateItemStatus: success",
 		"item_id", itemID,
 		"field_id", statusFieldID,
-		"new_value", func() string {
-			if optionID == nil {
-				return "(cleared)"
-			}
-			return *optionID
-		}(),
+		"new_value", newValue,
 	)
 
 	return updatedItem, nil

@@ -81,7 +81,7 @@ func (s *statuspicker) SelectedOptionID() string {
 
 // Update handles keyboard navigation for the picker.
 // Returns the updated picker and any commands (e.g. from onPick/onCancel).
-func (s *statuspicker) Update(msg tea.Msg) (*statuspicker, tea.Cmd) {
+func (s statuspicker) Update(msg tea.Msg) (statuspicker, tea.Cmd) {
 	if !s.open {
 		return s, nil
 	}

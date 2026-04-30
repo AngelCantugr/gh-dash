@@ -133,9 +133,8 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 	case tea.KeyMsg:
 		// While the status picker is open, route all key events to it.
 		if m.statusPicker.IsOpen() {
-			var cmd tea.Cmd
-			sp, cmd := m.statusPicker.Update(msg)
-			m.statusPicker = *sp
+			updated, cmd := m.statusPicker.Update(msg)
+			m.statusPicker = updated
 			return m, cmd
 		}
 
@@ -348,7 +347,7 @@ func (m *Model) handleEditStatus() tea.Cmd {
 	if m.schema == nil || m.schema.StatusField == nil {
 		// No Status field on this project — surface a footer hint via context error.
 		if m.ctx != nil {
-			m.ctx.Error = fmt.Errorf("This project has no Status field — edit in web UI")
+			m.ctx.Error = fmt.Errorf("This project has no Status field: edit in web UI")
 		}
 		return nil
 	}
@@ -498,7 +497,7 @@ func (m *Model) handleStatusUpdated(msg StatusUpdatedMsg) tea.Cmd {
 	serverSSV, serverIsSSV := serverStatus.(data.FieldValueSingleSelect)
 	if serverIsSSV && serverSSV.OptionID != msg.IntendedOptionID {
 		if m.ctx != nil {
-			m.ctx.Error = fmt.Errorf("Status was changed concurrently — refreshed")
+			m.ctx.Error = fmt.Errorf("Status was changed concurrently - refreshed")
 		}
 	}
 
