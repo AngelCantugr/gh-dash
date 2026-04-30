@@ -159,3 +159,76 @@ func TestGetColumns_Count(t *testing.T) {
 	require.Equal(t, "Updated", cols[4].Title)
 	require.NotNil(t, cols[0].Grow, "Title column should have Grow set")
 }
+
+// ---------------------------------------------------------------------------
+// filteredItems (AC #9 — client-side title search)
+// ---------------------------------------------------------------------------
+
+func TestFilteredItems_EmptyQuery_ReturnsAll(t *testing.T) {
+	m := &Model{
+		items: []data.ProjectItemData{
+			{ID: "1", Title: "Fix bug"},
+			{ID: "2", Title: "Add feature"},
+		},
+		searchQuery: "",
+	}
+	got := m.filteredItems()
+	require.Len(t, got, 2)
+}
+
+func TestFilteredItems_MatchesByTitle(t *testing.T) {
+	m := &Model{
+		items: []data.ProjectItemData{
+			{ID: "1", Title: "Fix auth bug"},
+			{ID: "2", Title: "Add dashboard"},
+			{ID: "3", Title: "Auth token refresh"},
+		},
+		searchQuery: "auth",
+	}
+	got := m.filteredItems()
+	require.Len(t, got, 2)
+	require.Equal(t, "1", got[0].ID)
+	require.Equal(t, "3", got[1].ID)
+}
+
+func TestFilteredItems_CaseInsensitive(t *testing.T) {
+	m := &Model{
+		items: []data.ProjectItemData{
+			{ID: "1", Title: "DEPLOY to staging"},
+			{ID: "2", Title: "deploy hotfix"},
+		},
+		searchQuery: "Deploy",
+	}
+	got := m.filteredItems()
+	require.Len(t, got, 2)
+}
+
+func TestFilteredItems_NoMatch_ReturnsEmpty(t *testing.T) {
+	m := &Model{
+		items: []data.ProjectItemData{
+			{ID: "1", Title: "Fix bug"},
+		},
+		searchQuery: "xyz_not_found",
+	}
+	got := m.filteredItems()
+	require.Empty(t, got)
+}
+
+// ---------------------------------------------------------------------------
+// GetProjectURL (AC #5/#6 — Draft/Redacted open project URL)
+// ---------------------------------------------------------------------------
+
+func TestGetProjectURL(t *testing.T) {
+	m := &Model{projectURL: "https://github.com/orgs/acme/projects/1"}
+	require.Equal(t, "https://github.com/orgs/acme/projects/1", m.GetProjectURL())
+}
+
+// ---------------------------------------------------------------------------
+// FetchItems no-op hint (AC #10)
+// ---------------------------------------------------------------------------
+
+func TestFetchItems_ReturnsNilWhenAlreadyFetching(t *testing.T) {
+	m := &Model{isFetching: true}
+	cmd := m.FetchItems(false)
+	require.Nil(t, cmd, "FetchItems should return nil when a fetch is already in progress")
+}

@@ -84,13 +84,17 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 	var cmd tea.Cmd
 
 	// While drilled-down, route most messages to the items sub-model.
-	// Back key is intercepted here so the parent can clear the drill-down state.
+	// Back and Refresh keys are intercepted here so the parent can act on them.
 	if m.isDrilledDown && m.itemsView != nil {
 		if keyMsg, ok := msg.(tea.KeyMsg); ok {
-			if key.Matches(keyMsg, keys.ProjectKeys.Back) {
+			switch {
+			case key.Matches(keyMsg, keys.ProjectKeys.Back):
 				m.isDrilledDown = false
 				m.itemsView = nil
 				return m, nil
+			case key.Matches(keyMsg, keys.ProjectKeys.Refresh):
+				// r inside drill-down refetches the items list, not the projects list.
+				return m, m.itemsView.FetchItems(false)
 			}
 		}
 		var iCmd tea.Cmd
@@ -202,11 +206,33 @@ func (m *Model) View() string {
 	return m.Table.View()
 }
 
+// projectItemBrowserProxy wraps a ProjectItemData but overrides GetUrl so
+// that Draft and Redacted items open the parent project URL in the browser
+// (they have no standalone GitHub URL).
+type projectItemBrowserProxy struct {
+	*data.ProjectItemData
+	url string
+}
+
+func (p *projectItemBrowserProxy) GetUrl() string { return p.url }
+
 // GetCurrRow returns the currently highlighted row.
 // When drilled-down, returns the highlighted project item; otherwise the project.
+// Draft and Redacted items are wrapped in a proxy that returns the project URL
+// so that the generic openBrowser handler in ui.go opens the right page.
 func (m *Model) GetCurrRow() data.RowData {
 	if m.isDrilledDown && m.itemsView != nil {
-		return m.itemsView.GetCurrItem()
+		item := m.itemsView.GetCurrItem()
+		if item == nil {
+			return nil
+		}
+		if item.Type == data.ItemTypeDraftIssue || item.Type == data.ItemTypeRedacted {
+			return &projectItemBrowserProxy{
+				ProjectItemData: item,
+				url:             m.itemsView.GetProjectURL(),
+			}
+		}
+		return item
 	}
 	idx := m.Table.GetCurrItem()
 	if idx < 0 || idx >= len(m.Projects) {
