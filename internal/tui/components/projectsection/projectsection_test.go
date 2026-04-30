@@ -155,6 +155,39 @@ func TestLastFetchTaskId_StaleDropLogic(t *testing.T) {
 	require.Nil(t, m.PageInfo, "stale response should not set PageInfo")
 }
 
+// ---------------------------------------------------------------------------
+// projectItemBrowserProxy (AC #5/#6 — o opens project URL for Draft/Redacted)
+// ---------------------------------------------------------------------------
+
+func TestProjectItemBrowserProxy_GetUrl_ReturnsOverrideURL(t *testing.T) {
+	item := &data.ProjectItemData{
+		ID:   "draft1",
+		Type: data.ItemTypeDraftIssue,
+		URL:  "https://github.com/orgs/acme/projects/1?pane=item&itemId=42",
+	}
+	proxy := &projectItemBrowserProxy{
+		ProjectItemData: item,
+		url:             "https://github.com/orgs/acme/projects/1",
+	}
+	// proxy must return the project URL, not the item URL
+	require.Equal(t, "https://github.com/orgs/acme/projects/1", proxy.GetUrl())
+	// other RowData methods must still delegate to the wrapped item
+	require.Equal(t, "draft1", proxy.ID)
+}
+
+func TestProjectItemBrowserProxy_GetUrl_Redacted(t *testing.T) {
+	item := &data.ProjectItemData{
+		ID:   "r1",
+		Type: data.ItemTypeRedacted,
+		URL:  "",
+	}
+	proxy := &projectItemBrowserProxy{
+		ProjectItemData: item,
+		url:             "https://github.com/orgs/acme/projects/2",
+	}
+	require.Equal(t, "https://github.com/orgs/acme/projects/2", proxy.GetUrl())
+}
+
 // TestConfirmation_CancelWithEsc verifies that Esc dismisses the prompt.
 func TestConfirmation_CancelWithEsc(t *testing.T) {
 	m := newTestModel()

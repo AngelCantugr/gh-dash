@@ -250,6 +250,39 @@ type ProjectItemData struct {
 	UpdatedAt time.Time   `json:"updatedAt"`
 }
 
+// RowData interface implementation so ProjectItemData can flow through the
+// standard sidebar routing in ui.go without a wrapper type.
+func (d *ProjectItemData) GetTitle() string {
+	if d == nil {
+		return ""
+	}
+	return d.Title
+}
+
+func (d *ProjectItemData) GetRepoNameWithOwner() string {
+	if d == nil {
+		return ""
+	}
+	return d.Repo
+}
+
+// GetNumber returns 0 — project items have no PR/issue number.
+func (d *ProjectItemData) GetNumber() int { return 0 }
+
+func (d *ProjectItemData) GetUrl() string {
+	if d == nil {
+		return ""
+	}
+	return d.URL
+}
+
+func (d *ProjectItemData) GetUpdatedAt() time.Time {
+	if d == nil {
+		return time.Time{}
+	}
+	return d.UpdatedAt
+}
+
 // --------------------------------------------------------------------------
 // projectItemsCache — single-file on-disk format
 // --------------------------------------------------------------------------
