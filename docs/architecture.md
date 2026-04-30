@@ -110,6 +110,7 @@ type Section interface {
 | [`components/issuessection/`](../internal/tui/components/issuessection/) | Issue list |
 | [`components/notificationssection/`](../internal/tui/components/notificationssection/) | Notifications inbox |
 | [`components/reposection/`](../internal/tui/components/reposection/) | Repo-scoped view (gated by `FF_REPO_VIEW`) |
+| [`components/projectsection/`](../internal/tui/components/projectsection/) | GitHub Projects v2 list with drill-down items view |
 
 Each concrete section embeds [`section.BaseModel`](../internal/tui/components/section/section.go#L30), which supplies pagination, a `search.Model`, a `prompt.Model`, and a `table.Model`. Concrete packages own a typed row slice (e.g. `[]prrow.Data`) that wraps the raw GraphQL struct.
 
@@ -175,10 +176,11 @@ After loading, keybindings are rebound globally via `keys.Rebind(...)` so the us
 
 Runtime-toggled via env vars, read through `config.IsFeatureEnabled`:
 
-| Flag constant | Env var | Effect |
-| --- | --- | --- |
-| `FF_REPO_VIEW` | `FF_REPO_VIEW` | Enables the repo-scoped view and accepts a positional repo arg. |
-| `FF_MOCK_DATA` | `FF_MOCK_DATA` | Replaces real fetches with canned fixtures (useful for UI work). |
+| Flag constant | Env var | Default | Effect |
+| --- | --- | --- | --- |
+| `FF_REPO_VIEW` | `FF_REPO_VIEW` | off | Enables the repo-scoped view and accepts a positional repo arg. |
+| `FF_PROJECTS_VIEW` | `FF_PROJECTS_VIEW` | **on** | Enables the GitHub Projects v2 tab. Set to `false` to opt out. |
+| `FF_MOCK_DATA` | `FF_MOCK_DATA` | off | Replaces real fetches with canned fixtures (useful for UI work). |
 
 ## Theming
 

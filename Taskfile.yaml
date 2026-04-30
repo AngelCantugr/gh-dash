@@ -91,6 +91,19 @@ tasks:
     cmds:
       - gofumpt -w $(git ls-files '*.go')
 
+  docs:
+    desc: Start the docs dev server (Astro Starlight, pnpm 10.14.0)
+    dir: docs
+    cmds:
+      - pnpm run dev
+    interactive: true
+
+  docs-build:
+    desc: Build the docs site (Astro Starlight)
+    dir: docs
+    cmds:
+      - pnpm run build
+
   check-nerd-font:
     cmds:
       - nerdfix check $(fd --extension go)
