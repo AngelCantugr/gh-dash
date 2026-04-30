@@ -75,7 +75,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		additionalKeys = BranchFullHelp()
 		customKeys = append(customKeys, CustomBranchBindings...)
 	case config.ProjectsView:
-		additionalKeys = []key.Binding{}
+		additionalKeys = ProjectFullHelp()
 		customKeys = append(customKeys, CustomProjectsBindings...)
 	case config.NotificationsView:
 		additionalKeys = NotificationFullHelp()

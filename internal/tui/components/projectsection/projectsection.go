@@ -4,15 +4,18 @@ import (
 	"fmt"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/dlvhdr/gh-dash/v4/internal/config"
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/projectitemsview"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/projectrow"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/section"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/table"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/constants"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/context"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/keys"
 	"github.com/dlvhdr/gh-dash/v4/internal/utils"
 )
 
@@ -27,6 +30,9 @@ type Model struct {
 	cfg           config.ProjectsSectionConfig
 	initialCursor int  // cursor restored from StateStore on first fetch
 	cursorApplied bool // true after initialCursor has been applied to the table
+	// Drill-down state: when isDrilledDown is true, itemsView is active.
+	isDrilledDown bool
+	itemsView     *projectitemsview.Model
 }
 
 // sectionKey returns the state-store key used to persist this section's cursor.
@@ -77,6 +83,21 @@ func NewModel(
 func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 	var cmd tea.Cmd
 
+	// While drilled-down, route most messages to the items sub-model.
+	// Back key is intercepted here so the parent can clear the drill-down state.
+	if m.isDrilledDown && m.itemsView != nil {
+		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			if key.Matches(keyMsg, keys.ProjectKeys.Back) {
+				m.isDrilledDown = false
+				m.itemsView = nil
+				return m, nil
+			}
+		}
+		var iCmd tea.Cmd
+		m.itemsView, iCmd = m.itemsView.Update(msg)
+		return m, iCmd
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if m.IsSearchFocused() {
@@ -109,6 +130,22 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 			break
 		}
 
+		// Drill key: open the items view for the selected project.
+		if key.Matches(msg, keys.ProjectKeys.Drill) {
+			if proj, ok := m.getProjectCurrRow(); ok {
+				iv := projectitemsview.NewModel(
+					m.Ctx,
+					m.Id,
+					proj.Primary.URL, // projectID — used as cache key
+					proj.Primary.Title,
+					proj.Primary.URL,
+				)
+				m.itemsView = iv
+				m.isDrilledDown = true
+				return m, m.itemsView.FetchItems(false)
+			}
+		}
+
 	case SectionProjectsFetchedMsg:
 		if m.LastFetchTaskId == msg.TaskId {
 			if m.PageInfo != nil {
@@ -128,6 +165,13 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 				m.cursorApplied = true
 			}
 		}
+
+	case projectitemsview.ProjectItemsFetchedMsg:
+		// Route to itemsView if present (may arrive after leaving drill-down — safe to ignore).
+		if m.itemsView != nil {
+			m.itemsView, cmd = m.itemsView.Update(msg)
+		}
+		return m, cmd
 	}
 
 	search, searchCmd := m.SearchBar.Update(msg)
@@ -148,6 +192,47 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmd, searchCmd, promptCmd, tableCmd)
+}
+
+// View returns either the items drill-down view or the normal projects table.
+func (m *Model) View() string {
+	if m.isDrilledDown && m.itemsView != nil {
+		return m.itemsView.View()
+	}
+	return m.Table.View()
+}
+
+// GetCurrRow returns the currently highlighted row.
+// When drilled-down, returns the highlighted project item; otherwise the project.
+func (m *Model) GetCurrRow() data.RowData {
+	if m.isDrilledDown && m.itemsView != nil {
+		return m.itemsView.GetCurrItem()
+	}
+	idx := m.Table.GetCurrItem()
+	if idx < 0 || idx >= len(m.Projects) {
+		return nil
+	}
+	p := m.Projects[idx]
+	return &p
+}
+
+// IsDrilledDown reports whether the items drill-down is active.
+func (m *Model) IsDrilledDown() bool {
+	return m.isDrilledDown
+}
+
+// getProjectCurrRow is a helper that retrieves the current project row data
+// when NOT in drill-down mode.
+func (m *Model) getProjectCurrRow() (*projectrow.Data, bool) {
+	idx := m.Table.GetCurrItem()
+	if idx < 0 || idx >= len(m.Projects) {
+		return nil, false
+	}
+	p := &m.Projects[idx]
+	if p.Primary == nil {
+		return nil, false
+	}
+	return p, true
 }
 
 func (m Model) BuildRows() []table.Row {
@@ -179,15 +264,6 @@ type SectionProjectsFetchedMsg struct {
 	TotalCount int
 	PageInfo   data.PageInfo
 	TaskId     string
-}
-
-func (m *Model) GetCurrRow() data.RowData {
-	idx := m.Table.GetCurrItem()
-	if idx < 0 || idx >= len(m.Projects) {
-		return nil
-	}
-	p := m.Projects[idx]
-	return &p
 }
 
 // FetchNextPageSectionRows kicks off an async fetch for this section's projects.

@@ -521,6 +521,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case key.Matches(msg, keys.IssueKeys.ViewPRs):
 				cmds = append(cmds, m.switchSelectedView())
 			}
+		case m.ctx.View == config.ProjectsView:
+			switch {
+			case key.Matches(msg, m.keys.OpenGithub):
+				cmds = append(cmds, m.openBrowser())
+
+			case key.Matches(msg, keys.ProjectKeys.Refresh):
+				if currSection != nil {
+					currSection.ResetRows()
+					currSection.SetIsLoading(true)
+					cmds = append(cmds, currSection.FetchNextPageSectionRows()...)
+				}
+			}
 		case m.ctx.View == config.NotificationsView:
 			switch {
 			case key.Matches(msg, m.keys.OpenGithub):
@@ -1264,8 +1276,28 @@ func (m *Model) syncSidebar() tea.Cmd {
 			m.sidebar.ScrollToBottom()
 		}
 	case *projectrow.Data:
-		// No drill-down for projects yet — clear the sidebar.
+		// If the project section is drilled-down, the row is a *data.ProjectItemData
+		// handled below. If we land here the section is NOT drilled-down yet — clear sidebar.
 		m.sidebar.SetContent("")
+	case *data.ProjectItemData:
+		// Drilled-down project item — show PR or Issue sidebar based on item type.
+		switch row.Type {
+		case data.ItemTypePullRequest:
+			m.sidebar.IsOpen = true
+			m.prView.SetSectionId(m.currSectionId)
+			m.prView.SetWidth(width)
+			m.sidebar.SetContent(m.prView.View())
+			cmd = m.prView.OpenByURL(row.URL)
+		case data.ItemTypeIssue:
+			m.sidebar.IsOpen = true
+			m.issueSidebar.SetSectionId(m.currSectionId)
+			m.issueSidebar.SetWidth(width)
+			m.sidebar.SetContent(m.issueSidebar.View())
+			cmd = m.issueSidebar.OpenByURL(row.URL)
+		default:
+			// Draft issues and redacted items — clear sidebar.
+			m.sidebar.SetContent("")
+		}
 	case *data.IssueData:
 		m.issueSidebar.SetSectionId(m.currSectionId)
 		m.issueSidebar.SetRow(row)

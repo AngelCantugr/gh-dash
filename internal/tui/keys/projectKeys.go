@@ -9,11 +9,12 @@ import (
 )
 
 // ProjectKeyMap holds keybindings for the projects list view.
-// The full set of project-specific actions will be finalized in PR #9 (drill-down).
 type ProjectKeyMap struct {
-	Drill   key.Binding // enter — reserved for drill-down (PR #9)
-	Refresh key.Binding // r     — refresh the projects list
-	OpenWeb key.Binding // o     — open the selected project in the browser
+	Drill    key.Binding // enter — drill into project items
+	Refresh  key.Binding // r     — refresh the projects list
+	OpenWeb  key.Binding // o     — open the selected project in the browser
+	LoadMore key.Binding // >     — load more items (inside items view)
+	Back     key.Binding // esc/b — return to projects list (inside items view)
 }
 
 var ProjectKeys = ProjectKeyMap{
@@ -29,6 +30,14 @@ var ProjectKeys = ProjectKeyMap{
 		key.WithKeys("o"),
 		key.WithHelp("o", "open in browser"),
 	),
+	LoadMore: key.NewBinding(
+		key.WithKeys(">"),
+		key.WithHelp(">", "load more"),
+	),
+	Back: key.NewBinding(
+		key.WithKeys("esc", "b"),
+		key.WithHelp("esc/b", "back"),
+	),
 }
 
 func ProjectFullHelp() []key.Binding {
@@ -36,6 +45,8 @@ func ProjectFullHelp() []key.Binding {
 		ProjectKeys.Drill,
 		ProjectKeys.Refresh,
 		ProjectKeys.OpenWeb,
+		ProjectKeys.LoadMore,
+		ProjectKeys.Back,
 	}
 }
 
@@ -70,6 +81,10 @@ func rebindProjectKeys(keys []config.Keybinding) error {
 			binding = &ProjectKeys.Refresh
 		case "openWeb":
 			binding = &ProjectKeys.OpenWeb
+		case "loadMore":
+			binding = &ProjectKeys.LoadMore
+		case "back":
+			binding = &ProjectKeys.Back
 		default:
 			return fmt.Errorf("unknown built-in project key: '%s'", projectKey.Builtin)
 		}
