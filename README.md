@@ -13,6 +13,58 @@ A rich terminal UI for GitHub that doesn't break your flow.
 - Everything you can do on GitHub - diff, comment, checkout, push, update etc.
 - Control every setting with a YAML config file
 
+## 🔧 Building & Installing from Source
+
+No releases are published from this fork — you must build and install from source.
+
+### Prerequisites
+
+- **[GitHub CLI (`gh`)](https://cli.github.com/)** — required at runtime for auth and as the extension host (`gh auth login` before first run)
+- **[Go 1.23+](https://go.dev/dl/)** — compiler
+- **[go-task](https://taskfile.dev/installation/)** — task runner (`task` CLI)
+
+### Option A: Devbox (recommended)
+
+[Devbox](https://www.jetpack.io/devbox) pins the exact toolchain (Go, go-task, linters) used in CI. One command sets everything up:
+
+```sh
+curl -fsSL https://get.jetpack.io/devbox | bash
+git clone https://github.com/AngelCantugr/gh-dash dash && cd dash
+devbox shell          # installs Go 1.23, go-task, gh, linters automatically
+task install          # build → install as gh extension → verify
+```
+
+### Option B: Manual (Go + go-task already installed)
+
+```sh
+git clone https://github.com/AngelCantugr/gh-dash dash && cd dash
+gh auth login         # if not already authenticated
+task install          # build → install as gh extension → verify
+```
+
+Or without go-task:
+
+```sh
+go build .
+gh ext install .
+gh dash --version
+```
+
+### Updating
+
+```sh
+git pull
+task install          # rebuild and reinstall — or: go build . && gh ext install .
+```
+
+### Uninstalling
+
+```sh
+gh ext remove dash
+```
+
+---
+
 ## ❤️ Donating
 
 If you enjoy `DASH` and want to help, consider supporting the project with a
