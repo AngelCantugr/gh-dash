@@ -47,7 +47,7 @@ func BuildColumns(schema *data.ProjectSchema, observed []data.ProjectItemData) [
 		if !ok {
 			continue
 		}
-		w := computeExtraWidth(fieldID, def, observed)
+		w := computeExtraWidth(fieldID, def, schema, observed)
 		wCopy := w
 		cols = append(cols, table.Column{
 			Title: def.Name,
@@ -60,13 +60,13 @@ func BuildColumns(schema *data.ProjectSchema, observed []data.ProjectItemData) [
 // computeExtraWidth returns the column width for an extra field: the maximum
 // of the header title width, the widest rendered value among observed items,
 // and the minimum extra column width.
-func computeExtraWidth(fieldID string, def data.FieldDef, observed []data.ProjectItemData) int {
+func computeExtraWidth(fieldID string, def data.FieldDef, schema *data.ProjectSchema, observed []data.ProjectItemData) int {
 	w := utf8.RuneCountInString(def.Name)
 	if w < colWidthExtraMin {
 		w = colWidthExtraMin
 	}
 	for _, item := range observed {
-		cell := renderExtraField(fieldID, item, nil)
+		cell := renderExtraField(fieldID, item, schema)
 		if cw := utf8.RuneCountInString(cell); cw > w {
 			w = cw
 		}
@@ -167,13 +167,15 @@ func renderDateValue(raw string) string {
 }
 
 // renderIterationValue formats an iteration as "Title (MMM D → MMM D)".
-// StartDate is "YYYY-MM-DD"; Duration is in days.
+// StartDate is "YYYY-MM-DD"; Duration is in days (total length, inclusive).
+// E.g. start=Apr 22, duration=14 → end=May 5 (Apr 22 is day 1, May 5 is day 14).
 func renderIterationValue(v data.FieldValueIteration) string {
 	start, err := time.Parse("2006-01-02", v.StartDate)
 	if err != nil {
 		// Fallback: just the title.
 		return v.Title
 	}
+	// Duration is total days inclusive, so last day = start + (duration-1) days.
 	end := start.AddDate(0, 0, v.Duration-1)
 	startFmt := fmt.Sprintf("%s %d", start.Format("Jan"), start.Day())
 	endFmt := fmt.Sprintf("%s %d", end.Format("Jan"), end.Day())
