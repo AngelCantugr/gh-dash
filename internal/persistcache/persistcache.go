@@ -45,6 +45,12 @@ func New() (*Store, error) {
 	return newWithRoot(root)
 }
 
+// NewWithRoot creates a Store rooted at root, creating the directory if needed.
+// Exported for use in tests outside this package.
+func NewWithRoot(root string) (*Store, error) {
+	return newWithRoot(root)
+}
+
 // newWithRoot creates a Store rooted at root, creating the directory if needed.
 // Used by New and by tests.
 func newWithRoot(root string) (*Store, error) {

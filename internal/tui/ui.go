@@ -528,6 +528,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			case key.Matches(msg, keys.ProjectKeys.Refresh):
 				if currSection != nil {
+					if err := projectsection.InvalidateCaches(m.ctx.ProjectsCache); err != nil {
+						log.Error("refresh: invalidate projects caches", "err", err)
+					}
 					currSection.ResetRows()
 					currSection.SetIsLoading(true)
 					cmds = append(cmds, currSection.FetchNextPageSectionRows()...)

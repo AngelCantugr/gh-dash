@@ -9,11 +9,17 @@ import (
 
 	"github.com/dlvhdr/gh-dash/v4/internal/config"
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
+	"github.com/dlvhdr/gh-dash/v4/internal/persistcache"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/projectrow"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/prompt"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/section"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/context"
 )
+
+// newTestStore creates a persistcache.Store rooted at dir, for use in tests.
+func newTestStore(dir string) (*persistcache.Store, error) {
+	return persistcache.NewWithRoot(dir)
+}
 
 func newTestCtx() *context.ProgramContext {
 	return &context.ProgramContext{
@@ -199,4 +205,59 @@ func TestConfirmation_CancelWithEsc(t *testing.T) {
 
 	require.False(t, m.IsPromptConfirmationShown,
 		"Esc should dismiss the confirmation prompt")
+}
+
+// TestInvalidateCaches_RemovesEntries verifies that InvalidateCaches deletes
+// all "projects/" and "project-items/" cache entries from the store.
+func TestInvalidateCaches_RemovesEntries(t *testing.T) {
+	dir := t.TempDir()
+	store, err := newTestStore(dir)
+	require.NoError(t, err)
+
+	// Write one entry under each prefix.
+	require.NoError(t, store.Put("projects/org/acme", []byte(`"v"`), time.Hour))
+	require.NoError(t, store.Put("projects/viewer", []byte(`"v"`), time.Hour))
+	require.NoError(t, store.Put("project-items/https://github.com/orgs/acme/projects/1", []byte(`"v"`), time.Hour))
+
+	require.NoError(t, InvalidateCaches(store))
+
+	_, hit1, _ := store.Get("projects/org/acme")
+	_, hit2, _ := store.Get("projects/viewer")
+	_, hit3, _ := store.Get("project-items/https://github.com/orgs/acme/projects/1")
+
+	require.False(t, hit1, "projects/org/acme should be evicted")
+	require.False(t, hit2, "projects/viewer should be evicted")
+	require.False(t, hit3, "project-items entry should be evicted")
+}
+
+// TestInvalidateCaches_NilStore is a no-op and must not panic.
+func TestInvalidateCaches_NilStore(t *testing.T) {
+	require.NoError(t, InvalidateCaches(nil))
+}
+
+// TestInvalidateCaches_EmptyStore succeeds when the cache dirs don't exist yet.
+func TestInvalidateCaches_EmptyStore(t *testing.T) {
+	dir := t.TempDir()
+	store, err := newTestStore(dir)
+	require.NoError(t, err)
+	require.NoError(t, InvalidateCaches(store))
+}
+
+// TestInvalidateCaches_BumpsGeneration verifies that Invalidate bumps the
+// generation counter so that an in-flight PutIfFresh is rejected.
+func TestInvalidateCaches_BumpsGeneration(t *testing.T) {
+	dir := t.TempDir()
+	store, err := newTestStore(dir)
+	require.NoError(t, err)
+
+	// Capture generation before invalidation for both prefixes.
+	genProjects := store.Generation("projects/")
+	genItems := store.Generation("project-items/")
+
+	require.NoError(t, InvalidateCaches(store))
+
+	require.Greater(t, store.Generation("projects/"), genProjects,
+		"projects/ generation should advance after InvalidateCaches")
+	require.Greater(t, store.Generation("project-items/"), genItems,
+		"project-items/ generation should advance after InvalidateCaches")
 }

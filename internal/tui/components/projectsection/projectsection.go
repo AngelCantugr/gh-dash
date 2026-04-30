@@ -1,6 +1,7 @@
 package projectsection
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 
 	"github.com/dlvhdr/gh-dash/v4/internal/config"
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
+	"github.com/dlvhdr/gh-dash/v4/internal/persistcache"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/projectitemsview"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/projectrow"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/section"
@@ -439,6 +441,23 @@ func (m Model) GetPagerContent() string {
 		)
 	}
 	return m.Ctx.Styles.ListViewPort.PagerStyle.Render(pagerContent)
+}
+
+// InvalidateCaches removes all on-disk cache entries under "projects/" and
+// "project-items/" so the next refresh fetches fresh data from GitHub.
+// A nil cache is a no-op; errors from both prefixes are joined and returned.
+func InvalidateCaches(cache *persistcache.Store) error {
+	if cache == nil {
+		return nil
+	}
+	var errs []error
+	if err := cache.Invalidate("projects/"); err != nil {
+		errs = append(errs, fmt.Errorf("invalidate projects cache: %w", err))
+	}
+	if err := cache.Invalidate("project-items/"); err != nil {
+		errs = append(errs, fmt.Errorf("invalidate project-items cache: %w", err))
+	}
+	return errors.Join(errs...)
 }
 
 // FetchAllSections creates/refreshes all project sections from config and
