@@ -893,10 +893,10 @@ type gqlClearStatusResult struct {
 
 // UpdateProjectV2ItemFieldValueInput matches the GitHub GraphQL input type.
 type UpdateProjectV2ItemFieldValueInput struct {
-	ProjectID string                          `json:"projectId"`
-	ItemID    string                          `json:"itemId"`
-	FieldID   string                          `json:"fieldId"`
-	Value     UpdateProjectV2ItemFieldValue   `json:"value"`
+	ProjectID string                        `json:"projectId"`
+	ItemID    string                        `json:"itemId"`
+	FieldID   string                        `json:"fieldId"`
+	Value     UpdateProjectV2ItemFieldValue `json:"value"`
 }
 
 // UpdateProjectV2ItemFieldValue holds the single-select option ID.

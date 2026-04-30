@@ -64,9 +64,9 @@ type ProjectItemsFetchedMsg struct {
 // on a successful status mutation. The UpdatedItem holds the server-authoritative
 // item state for reconciliation.
 type StatusUpdatedMsg struct {
-	ItemID          string
+	ItemID           string
 	IntendedOptionID string // option ID that was optimistically applied
-	UpdatedItem     data.ProjectItemData
+	UpdatedItem      data.ProjectItemData
 }
 
 // StatusUpdateErrMsg is the inner tea.Msg carried by constants.TaskFinishedMsg
@@ -347,7 +347,7 @@ func (m *Model) handleEditStatus() tea.Cmd {
 	if m.schema == nil || m.schema.StatusField == nil {
 		// No Status field on this project — surface a footer hint via context error.
 		if m.ctx != nil {
-			m.ctx.Error = fmt.Errorf("This project has no Status field: edit in web UI")
+			m.ctx.Error = fmt.Errorf("this project has no Status field: edit in web UI")
 		}
 		return nil
 	}
@@ -475,7 +475,7 @@ func (m *Model) handleStatusUpdated(msg StatusUpdatedMsg) tea.Cmd {
 	statusFieldID := m.schema.StatusField.ID
 
 	// Determine the server-authoritative status value.
-	serverStatus, _ := msg.UpdatedItem.Fields[statusFieldID]
+	serverStatus := msg.UpdatedItem.Fields[statusFieldID]
 
 	// Reconcile: apply the server value (not the intended value) to the item.
 	for i, item := range m.items {
@@ -497,7 +497,7 @@ func (m *Model) handleStatusUpdated(msg StatusUpdatedMsg) tea.Cmd {
 	serverSSV, serverIsSSV := serverStatus.(data.FieldValueSingleSelect)
 	if serverIsSSV && serverSSV.OptionID != msg.IntendedOptionID {
 		if m.ctx != nil {
-			m.ctx.Error = fmt.Errorf("Status was changed concurrently - refreshed")
+			m.ctx.Error = fmt.Errorf("status was changed concurrently - refreshed")
 		}
 	}
 
@@ -529,7 +529,7 @@ func (m *Model) handleStatusUpdateErr(msg StatusUpdateErrMsg) tea.Cmd {
 
 	// Surface error in the footer for 2 seconds.
 	if m.ctx != nil {
-		m.ctx.Error = fmt.Errorf("Failed to update status: %w", msg.Err)
+		m.ctx.Error = fmt.Errorf("failed to update status: %w", msg.Err)
 	}
 
 	return tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {

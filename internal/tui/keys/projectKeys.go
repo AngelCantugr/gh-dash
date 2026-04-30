@@ -10,12 +10,12 @@ import (
 
 // ProjectKeyMap holds keybindings for the projects list view.
 type ProjectKeyMap struct {
-	Drill        key.Binding // enter — drill into project items
-	Refresh      key.Binding // r     — refresh the projects list
-	OpenWeb      key.Binding // o     — open the selected project in the browser
-	LoadMore     key.Binding // >     — load more items (inside items view)
-	Back         key.Binding // esc/b — return to projects list (inside items view)
-	EditStatus   key.Binding // S     — open status picker for the selected item
+	Drill      key.Binding // enter — drill into project items
+	Refresh    key.Binding // r     — refresh the projects list
+	OpenWeb    key.Binding // o     — open the selected project in the browser
+	LoadMore   key.Binding // >     — load more items (inside items view)
+	Back       key.Binding // esc/b — return to projects list (inside items view)
+	EditStatus key.Binding // S     — open status picker for the selected item
 }
 
 var ProjectKeys = ProjectKeyMap{
