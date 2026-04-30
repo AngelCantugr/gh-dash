@@ -29,7 +29,7 @@ No releases are published from this fork — you must build and install from sou
 
 ```sh
 curl -fsSL https://get.jetpack.io/devbox | bash
-git clone https://github.com/AngelCantugr/gh-dash && cd gh-dash
+git clone https://github.com/AngelCantugr/gh-dash dash && cd dash
 devbox shell          # installs Go 1.23, go-task, gh, linters automatically
 task install          # build → install as gh extension → verify
 ```
@@ -37,7 +37,7 @@ task install          # build → install as gh extension → verify
 ### Option B: Manual (Go + go-task already installed)
 
 ```sh
-git clone https://github.com/AngelCantugr/gh-dash && cd gh-dash
+git clone https://github.com/AngelCantugr/gh-dash dash && cd dash
 gh auth login         # if not already authenticated
 task install          # build → install as gh extension → verify
 ```
@@ -54,7 +54,7 @@ gh dash --version
 
 ```sh
 git pull
-task install          # rebuild and reinstall
+task install          # rebuild and reinstall — or: go build . && gh ext install .
 ```
 
 ### Uninstalling
