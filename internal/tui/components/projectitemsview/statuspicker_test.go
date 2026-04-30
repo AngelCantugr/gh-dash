@@ -350,7 +350,7 @@ func TestOptimistic_Error_RevertsItem(t *testing.T) {
 
 	// An error must be surfaced in the footer.
 	require.NotNil(t, m.ctx.Error)
-	assert.Contains(t, m.ctx.Error.Error(), "Failed to update status")
+	assert.Contains(t, m.ctx.Error.Error(), "failed to update status")
 
 	// A 2s tick must be scheduled to clear the error.
 	require.NotNil(t, cmd, "expected a tick cmd to clear the error after 2s")
