@@ -12,6 +12,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"charm.land/log/v2"
 
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
 	"github.com/dlvhdr/gh-dash/v4/internal/persistcache"
@@ -20,6 +21,10 @@ import (
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/context"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/keys"
 )
+
+// sectionTypeProject is the section type string for projectsection.
+// Defined here to avoid an import cycle with projectsection.
+const sectionTypeProject = "project"
 
 // Model is a plain Bubble Tea sub-model owned by projectsection.Model.
 // It renders project items in a table and manages its own fetch/pagination
@@ -40,6 +45,10 @@ type Model struct {
 	isSearching bool
 	searchQuery string
 	searchInput textinput.Model
+	// status picker state
+	statusPicker   statuspicker
+	pickerItemID   string          // ID of the item whose status is being edited
+	previousStatus data.FieldValue // saved status value for rollback on error
 }
 
 // ProjectItemsFetchedMsg is returned by the async fetch cmd.
@@ -49,6 +58,23 @@ type ProjectItemsFetchedMsg struct {
 	PageInfo data.PageInfo
 	Err      error
 	Append   bool // false = initial load, true = load-more
+}
+
+// StatusUpdatedMsg is the inner tea.Msg carried by constants.TaskFinishedMsg
+// on a successful status mutation. The UpdatedItem holds the server-authoritative
+// item state for reconciliation.
+type StatusUpdatedMsg struct {
+	ItemID           string
+	IntendedOptionID string // option ID that was optimistically applied
+	UpdatedItem      data.ProjectItemData
+}
+
+// StatusUpdateErrMsg is the inner tea.Msg carried by constants.TaskFinishedMsg
+// when a status mutation fails. The view reverts the optimistic change on receipt.
+type StatusUpdateErrMsg struct {
+	ItemID         string
+	PreviousStatus data.FieldValue // value to restore
+	Err            error
 }
 
 // NewModel creates a new projectitemsview.Model for the given project.
@@ -80,7 +106,8 @@ func NewModel(
 	si.Placeholder = "Search by title..."
 	si.Prompt = " / "
 	si.Blur()
-	return &Model{
+
+	m := &Model{
 		ctx:             ctx,
 		projectID:       projectID,
 		projectTitle:    projectTitle,
@@ -90,6 +117,9 @@ func NewModel(
 		table:           tbl,
 		searchInput:     si,
 	}
+	// statusPicker callbacks reference m so they must be set after m is created.
+	m.statusPicker = newStatusPicker(ctx, m.onStatusPicked, m.onStatusCancelled)
+	return m
 }
 
 // Init satisfies the tea.Model convention; callers should use FetchItems.
@@ -101,6 +131,13 @@ func (m *Model) Init() tea.Cmd {
 func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// While the status picker is open, route all key events to it.
+		if m.statusPicker.IsOpen() {
+			updated, cmd := m.statusPicker.Update(msg)
+			m.statusPicker = updated
+			return m, cmd
+		}
+
 		// Route to search input while searching.
 		if m.isSearching {
 			switch msg.String() {
@@ -143,7 +180,23 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		case key.Matches(msg, keys.Keys.Search):
 			m.isSearching = true
 			return m, m.searchInput.Focus()
+
+		case key.Matches(msg, keys.ProjectKeys.EditStatus):
+			return m, m.handleEditStatus()
 		}
+
+	case StatusUpdatedMsg:
+		return m, m.handleStatusUpdated(msg)
+
+	case StatusUpdateErrMsg:
+		return m, m.handleStatusUpdateErr(msg)
+
+	case clearStatusErrorMsg:
+		// Clear the transient error from the footer after the 2s flash.
+		if m.ctx != nil {
+			m.ctx.Error = nil
+		}
+		return m, nil
 
 	case ProjectItemsFetchedMsg:
 		m.isFetching = false
@@ -185,6 +238,7 @@ func (m *Model) filteredItems() []data.ProjectItemData {
 }
 
 // View renders the breadcrumb header, optional search bar, and the table.
+// When the status picker is open it is rendered below the table as an overlay.
 func (m *Model) View() string {
 	breadcrumb := lipgloss.NewStyle().
 		Foreground(m.ctx.Theme.FaintText).
@@ -198,6 +252,9 @@ func (m *Model) View() string {
 		parts = append(parts, m.searchInput.View())
 	}
 	parts = append(parts, m.table.View())
+	if pickerView := m.statusPicker.View(); pickerView != "" {
+		parts = append(parts, pickerView)
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
@@ -279,3 +336,207 @@ func (m *Model) UpdateProgramContext(ctx *context.ProgramContext) {
 	// We do this by re-setting rows so the internal ctx is also refreshed via Update.
 	_ = tblCtx // used to avoid shadowing warning; dimension update above suffices.
 }
+
+// --------------------------------------------------------------------------
+// Status mutation helpers
+// --------------------------------------------------------------------------
+
+// handleEditStatus opens the status picker for the currently selected item,
+// or surfaces a hint when the project has no Status field.
+func (m *Model) handleEditStatus() tea.Cmd {
+	if m.schema == nil || m.schema.StatusField == nil {
+		// No Status field on this project — surface a footer hint via context error.
+		if m.ctx != nil {
+			m.ctx.Error = fmt.Errorf("this project has no Status field: edit in web UI")
+		}
+		return nil
+	}
+
+	item := m.GetCurrItem()
+	if item == nil {
+		return nil
+	}
+
+	// Store the item ID and its current status for potential rollback.
+	m.pickerItemID = item.ID
+	if item.Fields != nil {
+		m.previousStatus = item.Fields[m.schema.StatusField.ID]
+	}
+
+	m.statusPicker.Open(m.schema.StatusField.Options)
+	return nil
+}
+
+// onStatusPicked is the statuspicker.onPick callback. It applies the optimistic
+// update and fires the async mutation command.
+func (m *Model) onStatusPicked(optionID string) tea.Cmd {
+	if m.schema == nil || m.schema.StatusField == nil {
+		return nil
+	}
+
+	// Find the option name for the optimistic display value.
+	optName := optionID
+	for _, opt := range m.schema.StatusField.Options {
+		if opt.ID == optionID {
+			optName = opt.Name
+			break
+		}
+	}
+
+	// Optimistically update the item in place.
+	itemID := m.pickerItemID
+	for i, item := range m.items {
+		if item.ID == itemID {
+			if m.items[i].Fields == nil {
+				m.items[i].Fields = make(data.FieldValues)
+			}
+			m.items[i].Fields[m.schema.StatusField.ID] = data.FieldValueSingleSelect{
+				OptionID: optionID,
+				Name:     optName,
+			}
+			break
+		}
+	}
+	m.table.SetRows(BuildRows(m.ctx, m.filteredItems(), m.schema))
+
+	// Capture values for the goroutine closure.
+	projectID := m.projectID
+	statusFieldID := m.schema.StatusField.ID
+	sectionId := m.sectionId
+	taskID := fmt.Sprintf("update_status_%s_%d", itemID, time.Now().UnixNano())
+	var cache *persistcache.Store
+	if m.ctx != nil {
+		cache = m.ctx.ProjectsCache
+	}
+
+	optIDCopy := optionID
+
+	// Register the task with the footer spinner.
+	var startCmd tea.Cmd
+	if m.ctx != nil && m.ctx.StartTask != nil {
+		task := context.Task{
+			Id:           taskID,
+			StartText:    "Updating status…",
+			FinishedText: "Status updated",
+			State:        context.TaskStart,
+		}
+		startCmd = m.ctx.StartTask(task)
+	}
+
+	// Async mutation command.
+	mutateCmd := func() tea.Msg {
+		updatedItem, err := data.UpdateItemStatus(cache, projectID, itemID, statusFieldID, &optIDCopy)
+		if err != nil {
+			log.Warn("UpdateItemStatus: mutation failed",
+				"item_id", itemID,
+				"field_id", statusFieldID,
+				"error_class", fmt.Sprintf("%T", err),
+				"err", err,
+			)
+			return constants.TaskFinishedMsg{
+				TaskId:      taskID,
+				SectionId:   sectionId,
+				SectionType: sectionTypeProject,
+				Err:         err,
+				Msg: StatusUpdateErrMsg{
+					ItemID:         itemID,
+					PreviousStatus: m.previousStatus,
+					Err:            err,
+				},
+			}
+		}
+		return constants.TaskFinishedMsg{
+			TaskId:      taskID,
+			SectionId:   sectionId,
+			SectionType: sectionTypeProject,
+			Msg: StatusUpdatedMsg{
+				ItemID:           itemID,
+				IntendedOptionID: optIDCopy,
+				UpdatedItem:      updatedItem,
+			},
+		}
+	}
+
+	return tea.Batch(startCmd, mutateCmd)
+}
+
+// onStatusCancelled is the statuspicker.onCancel callback. No mutation is fired.
+func (m *Model) onStatusCancelled() tea.Cmd {
+	return nil
+}
+
+// handleStatusUpdated reconciles the item from the server response.
+// If the server's value differs from the intended value (concurrent edit),
+// a hint is surfaced in the footer.
+func (m *Model) handleStatusUpdated(msg StatusUpdatedMsg) tea.Cmd {
+	if m.schema == nil || m.schema.StatusField == nil {
+		return nil
+	}
+	statusFieldID := m.schema.StatusField.ID
+
+	// Determine the server-authoritative status value.
+	serverStatus := msg.UpdatedItem.Fields[statusFieldID]
+
+	// Reconcile: apply the server value (not the intended value) to the item.
+	for i, item := range m.items {
+		if item.ID == msg.ItemID {
+			if m.items[i].Fields == nil {
+				m.items[i].Fields = make(data.FieldValues)
+			}
+			if serverStatus != nil {
+				m.items[i].Fields[statusFieldID] = serverStatus
+			} else {
+				delete(m.items[i].Fields, statusFieldID)
+			}
+			break
+		}
+	}
+	m.table.SetRows(BuildRows(m.ctx, m.filteredItems(), m.schema))
+
+	// Check whether the server value differs from what we intended (concurrent edit).
+	serverSSV, serverIsSSV := serverStatus.(data.FieldValueSingleSelect)
+	if serverIsSSV && serverSSV.OptionID != msg.IntendedOptionID {
+		if m.ctx != nil {
+			m.ctx.Error = fmt.Errorf("status was changed concurrently - refreshed")
+		}
+	}
+
+	return nil
+}
+
+// handleStatusUpdateErr reverts the optimistic update and surfaces a 2s error flash.
+func (m *Model) handleStatusUpdateErr(msg StatusUpdateErrMsg) tea.Cmd {
+	if m.schema == nil || m.schema.StatusField == nil {
+		return nil
+	}
+	statusFieldID := m.schema.StatusField.ID
+
+	// Revert to the saved previous status.
+	for i, item := range m.items {
+		if item.ID == msg.ItemID {
+			if m.items[i].Fields == nil {
+				m.items[i].Fields = make(data.FieldValues)
+			}
+			if msg.PreviousStatus != nil {
+				m.items[i].Fields[statusFieldID] = msg.PreviousStatus
+			} else {
+				delete(m.items[i].Fields, statusFieldID)
+			}
+			break
+		}
+	}
+	m.table.SetRows(BuildRows(m.ctx, m.filteredItems(), m.schema))
+
+	// Surface error in the footer for 2 seconds.
+	if m.ctx != nil {
+		m.ctx.Error = fmt.Errorf("failed to update status: %w", msg.Err)
+	}
+
+	return tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
+		return clearStatusErrorMsg{}
+	})
+}
+
+// clearStatusErrorMsg clears the status-update error from the footer after the
+// 2-second flash window.
+type clearStatusErrorMsg struct{}

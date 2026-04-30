@@ -10,11 +10,12 @@ import (
 
 // ProjectKeyMap holds keybindings for the projects list view.
 type ProjectKeyMap struct {
-	Drill    key.Binding // enter — drill into project items
-	Refresh  key.Binding // r     — refresh the projects list
-	OpenWeb  key.Binding // o     — open the selected project in the browser
-	LoadMore key.Binding // >     — load more items (inside items view)
-	Back     key.Binding // esc/b — return to projects list (inside items view)
+	Drill      key.Binding // enter — drill into project items
+	Refresh    key.Binding // r     — refresh the projects list
+	OpenWeb    key.Binding // o     — open the selected project in the browser
+	LoadMore   key.Binding // >     — load more items (inside items view)
+	Back       key.Binding // esc/b — return to projects list (inside items view)
+	EditStatus key.Binding // S     — open status picker for the selected item
 }
 
 var ProjectKeys = ProjectKeyMap{
@@ -38,6 +39,10 @@ var ProjectKeys = ProjectKeyMap{
 		key.WithKeys("esc", "b"),
 		key.WithHelp("esc/b", "back"),
 	),
+	EditStatus: key.NewBinding(
+		key.WithKeys("S"),
+		key.WithHelp("S", "edit status"),
+	),
 }
 
 func ProjectFullHelp() []key.Binding {
@@ -47,6 +52,7 @@ func ProjectFullHelp() []key.Binding {
 		ProjectKeys.OpenWeb,
 		ProjectKeys.LoadMore,
 		ProjectKeys.Back,
+		ProjectKeys.EditStatus,
 	}
 }
 
@@ -85,6 +91,8 @@ func rebindProjectKeys(keys []config.Keybinding) error {
 			binding = &ProjectKeys.LoadMore
 		case "back":
 			binding = &ProjectKeys.Back
+		case "editStatus":
+			binding = &ProjectKeys.EditStatus
 		default:
 			return fmt.Errorf("unknown built-in project key: '%s'", projectKey.Builtin)
 		}

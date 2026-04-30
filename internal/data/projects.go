@@ -860,3 +860,151 @@ func mockProjectFilePaths(owners []OwnerRef) []string {
 	}
 	return paths
 }
+
+// --------------------------------------------------------------------------
+// UpdateItemStatus — projectV2 single-select status mutation
+// --------------------------------------------------------------------------
+
+// gqlUpdateStatusResult is the GraphQL response shape for updateProjectV2ItemFieldValue.
+type gqlUpdateStatusResult struct {
+	UpdateProjectV2ItemFieldValue struct {
+		ProjectV2Item struct {
+			Id          string `graphql:"id"`
+			FieldValues struct {
+				Nodes []gqlFieldValueNode
+			} `graphql:"fieldValues(first: 20)"`
+			UpdatedAt time.Time
+		}
+	} `graphql:"updateProjectV2ItemFieldValue(input: $input)"`
+}
+
+// gqlClearStatusResult is the GraphQL response shape for clearProjectV2ItemFieldValue.
+type gqlClearStatusResult struct {
+	ClearProjectV2ItemFieldValue struct {
+		ProjectV2Item struct {
+			Id          string `graphql:"id"`
+			FieldValues struct {
+				Nodes []gqlFieldValueNode
+			} `graphql:"fieldValues(first: 20)"`
+			UpdatedAt time.Time
+		}
+	} `graphql:"clearProjectV2ItemFieldValue(input: $input)"`
+}
+
+// UpdateProjectV2ItemFieldValueInput matches the GitHub GraphQL input type.
+type UpdateProjectV2ItemFieldValueInput struct {
+	ProjectID string                        `json:"projectId"`
+	ItemID    string                        `json:"itemId"`
+	FieldID   string                        `json:"fieldId"`
+	Value     UpdateProjectV2ItemFieldValue `json:"value"`
+}
+
+// UpdateProjectV2ItemFieldValue holds the single-select option ID.
+type UpdateProjectV2ItemFieldValue struct {
+	SingleSelectOptionID string `json:"singleSelectOptionId"`
+}
+
+// ClearProjectV2ItemFieldValueInput matches the GitHub GraphQL input type.
+type ClearProjectV2ItemFieldValueInput struct {
+	ProjectID string `json:"projectId"`
+	ItemID    string `json:"itemId"`
+	FieldID   string `json:"fieldId"`
+}
+
+// UpdateItemStatus mutates the Status field of a project item.
+//
+//   - optionID == nil  → clearProjectV2ItemFieldValue (removes the status)
+//   - optionID != nil  → updateProjectV2ItemFieldValue (sets the status to the given option)
+//
+// On success the function:
+//  1. Returns a ProjectItemData built from the mutation response (for reconciliation).
+//  2. Invalidates the project-items cache prefix so the next FetchProjectItems returns fresh data.
+func UpdateItemStatus(
+	cache *persistcache.Store,
+	projectID, itemID, statusFieldID string,
+	optionID *string,
+) (ProjectItemData, error) {
+	if err := ensureProjectsClient(); err != nil {
+		return ProjectItemData{}, fmt.Errorf("UpdateItemStatus: init client: %w", err)
+	}
+
+	var (
+		resultID        string
+		resultFieldVals []gqlFieldValueNode
+		resultUpdatedAt time.Time
+	)
+
+	if optionID == nil {
+		// Clear the status field.
+		var mutResult gqlClearStatusResult
+		vars := map[string]any{
+			"input": map[string]any{
+				"projectId": projectID,
+				"itemId":    itemID,
+				"fieldId":   statusFieldID,
+			},
+		}
+		if err := client.Mutate("ClearProjectItemStatus", &mutResult, vars); err != nil {
+			return ProjectItemData{}, fmt.Errorf("UpdateItemStatus: clear mutation: %w", err)
+		}
+		item := mutResult.ClearProjectV2ItemFieldValue.ProjectV2Item
+		resultID = item.Id
+		resultFieldVals = item.FieldValues.Nodes
+		resultUpdatedAt = item.UpdatedAt
+	} else {
+		// Set the status field.
+		var mutResult gqlUpdateStatusResult
+		vars := map[string]any{
+			"input": map[string]any{
+				"projectId": projectID,
+				"itemId":    itemID,
+				"fieldId":   statusFieldID,
+				"value": map[string]any{
+					"singleSelectOptionId": *optionID,
+				},
+			},
+		}
+		if err := client.Mutate("UpdateProjectItemStatus", &mutResult, vars); err != nil {
+			return ProjectItemData{}, fmt.Errorf("UpdateItemStatus: update mutation: %w", err)
+		}
+		item := mutResult.UpdateProjectV2ItemFieldValue.ProjectV2Item
+		resultID = item.Id
+		resultFieldVals = item.FieldValues.Nodes
+		resultUpdatedAt = item.UpdatedAt
+	}
+
+	// Build the returned item from the mutation response.
+	fields := make(FieldValues)
+	for _, fvNode := range resultFieldVals {
+		fieldID, fv := parseFieldValue(fvNode)
+		if fieldID != "" {
+			fields[fieldID] = fv
+		}
+	}
+	updatedItem := ProjectItemData{
+		ID:        resultID,
+		Fields:    fields,
+		UpdatedAt: resultUpdatedAt,
+	}
+
+	// Invalidate the per-project items cache so PutIfFresh calls from in-flight
+	// load-more goroutines are rejected and the next FetchProjectItems is fresh.
+	if cache != nil {
+		cacheKey := fmt.Sprintf("project-items/%s", projectID)
+		if err := cache.Invalidate(cacheKey); err != nil {
+			log.Warn("UpdateItemStatus: cache invalidation error", "key", cacheKey, "err", err)
+		}
+	}
+
+	newValue := "(cleared)"
+	if optionID != nil {
+		newValue = *optionID
+	}
+	log.Debug("UpdateItemStatus: success",
+		"item_id", itemID,
+		"field_id", statusFieldID,
+		"new_value", newValue,
+	)
+
+	return updatedItem, nil
+}

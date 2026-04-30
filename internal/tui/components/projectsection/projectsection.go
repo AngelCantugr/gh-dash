@@ -142,7 +142,7 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 				iv := projectitemsview.NewModel(
 					m.Ctx,
 					m.Id,
-					proj.Primary.URL, // projectID — used as cache key
+					proj.Primary.ID, // projectID — GraphQL node ID, used as cache key and mutation input
 					proj.Primary.Title,
 					proj.Primary.URL,
 					m.cfg.ExtraFields,
