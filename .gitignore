@@ -7,6 +7,9 @@ gh-prs
 .DS_Store
 .killgrave.log
 docs/broken-links.log
+docs/dist/
+docs/node_modules/
+docs/.astro/
 .devbox
 __debug*
 testdata/gh-schema.graphql
