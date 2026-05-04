@@ -117,6 +117,29 @@ func (s *Store) getKeyMu(key string) *sync.Mutex {
 //   - Read error: returns (nil, false, err)
 //   - Corrupt JSON: deletes the file and returns (nil, false, nil)
 func (s *Store) Get(key string) ([]byte, bool, error) {
+	data, _, err := s.read(key)
+	if err != nil || data == nil {
+		return nil, false, err
+	}
+	return data, true, nil
+}
+
+// GetStale reads a cache entry regardless of TTL. Useful as a fallback when
+// the network request fails — stale data is better than nothing.
+//   - Found (expired or not): returns (data, true, nil)
+//   - Miss (file absent): returns (nil, false, nil)
+//   - Read error or corrupt JSON: same as Get
+func (s *Store) GetStale(key string) ([]byte, bool, error) {
+	data, _, err := s.readRaw(key)
+	if err != nil || data == nil {
+		return nil, false, err
+	}
+	return data, true, nil
+}
+
+// read returns the value bytes when the entry exists and has not expired.
+// Returns (nil, false, nil) for a miss or expired entry.
+func (s *Store) read(key string) ([]byte, bool, error) {
 	path, err := s.keyPath(key)
 	if err != nil {
 		return nil, false, err
@@ -132,12 +155,35 @@ func (s *Store) Get(key string) ([]byte, bool, error) {
 
 	var entry cacheEntry
 	if err := json.Unmarshal(raw, &entry); err != nil {
-		// Self-heal: delete the corrupt file and return a miss.
 		_ = os.Remove(path)
 		return nil, false, nil
 	}
 
 	if time.Now().After(entry.ExpiresAt) {
+		return nil, false, nil
+	}
+
+	return []byte(entry.Value), true, nil
+}
+
+// readRaw returns the value bytes whether or not the entry is expired.
+func (s *Store) readRaw(key string) ([]byte, bool, error) {
+	path, err := s.keyPath(key)
+	if err != nil {
+		return nil, false, err
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+
+	var entry cacheEntry
+	if err := json.Unmarshal(raw, &entry); err != nil {
+		_ = os.Remove(path)
 		return nil, false, nil
 	}
 

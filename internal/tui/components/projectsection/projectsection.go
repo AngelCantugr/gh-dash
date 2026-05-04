@@ -283,7 +283,45 @@ func (m Model) BuildRows() []table.Row {
 }
 
 func (m *Model) NumRows() int {
+	if m.isDrilledDown && m.itemsView != nil {
+		return len(m.itemsView.Items())
+	}
 	return len(m.Projects)
+}
+
+func (m *Model) CurrRow() int {
+	if m.isDrilledDown && m.itemsView != nil {
+		return m.itemsView.TableCurrItem()
+	}
+	return m.Table.GetCurrItem()
+}
+
+func (m *Model) NextRow() int {
+	if m.isDrilledDown && m.itemsView != nil {
+		return m.itemsView.TableNextItem()
+	}
+	return m.Table.NextItem()
+}
+
+func (m *Model) PrevRow() int {
+	if m.isDrilledDown && m.itemsView != nil {
+		return m.itemsView.TablePrevItem()
+	}
+	return m.Table.PrevItem()
+}
+
+func (m *Model) FirstItem() int {
+	if m.isDrilledDown && m.itemsView != nil {
+		return m.itemsView.TableFirstItem()
+	}
+	return m.Table.FirstItem()
+}
+
+func (m *Model) LastItem() int {
+	if m.isDrilledDown && m.itemsView != nil {
+		return m.itemsView.TableLastItem()
+	}
+	return m.Table.LastItem()
 }
 
 // SectionProjectsFetchedMsg is emitted by the fetch command when the network

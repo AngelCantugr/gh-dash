@@ -323,8 +323,32 @@ const (
 
 // gqlFieldRef is the common shape for a field reference inside a field-value node.
 // All ProjectV2FieldCommon implementors expose id directly.
+// gqlFieldRef extracts the id from a ProjectV2FieldConfiguration union.
+// GitHub changed the type of .field on item field-value nodes from a concrete
+// type to this union, so each variant must be addressed with an inline fragment.
 type gqlFieldRef struct {
-	Id string `graphql:"id"`
+	AsField        struct{ Id string `graphql:"id"` } `graphql:"... on ProjectV2Field"`
+	AsSingleSelect struct{ Id string `graphql:"id"` } `graphql:"... on ProjectV2SingleSelectField"`
+	AsIteration    struct{ Id string `graphql:"id"` } `graphql:"... on ProjectV2IterationField"`
+}
+
+// fieldRefID returns the id from whichever union variant was populated.
+func fieldRefID(f gqlFieldRef) string {
+	if f.AsField.Id != "" {
+		return f.AsField.Id
+	}
+	if f.AsSingleSelect.Id != "" {
+		return f.AsSingleSelect.Id
+	}
+	return f.AsIteration.Id
+}
+
+// newFieldRef builds a gqlFieldRef for tests by placing the id in the
+// ProjectV2Field variant (the most common concrete type).
+func newFieldRef(id string) gqlFieldRef {
+	var f gqlFieldRef
+	f.AsField.Id = id
+	return f
 }
 
 // gqlFieldOption is one option in a single-select field's option list.
@@ -380,6 +404,12 @@ type gqlFieldValueNode struct {
 		Field gqlFieldRef
 		Text  string
 	} `graphql:"... on ProjectV2ItemFieldTextValue"`
+	AsParentIssue struct {
+		Field gqlFieldRef
+		Issue struct {
+			Number int
+		}
+	} `graphql:"... on ProjectV2ItemFieldParentIssueValue"`
 }
 
 // gqlItemNode represents a single ProjectV2Item from the items connection.
@@ -506,7 +536,7 @@ func FetchProjectItems(
 	}
 
 	variables := map[string]any{
-		"projectId": graphql.String(projectID),
+		"projectId": graphql.ID(projectID),
 		"first":     graphql.Int(limit),
 		"after":     afterCursor,
 	}
@@ -514,6 +544,16 @@ func FetchProjectItems(
 	log.Debug("FetchProjectItems: querying", "project_id", projectID, "after", after, "limit", limit)
 
 	if err := client.Query("FetchProjectItems", &queryResult, variables); err != nil {
+		// On API error fall back to stale cache so the spinner doesn't freeze.
+		if isFirstPage && cache != nil {
+			if raw, hit, _ := cache.GetStale(cacheKey); hit {
+				var stale projectItemsCache
+				if jsonErr := json.Unmarshal(raw, &stale); jsonErr == nil {
+					log.Warn("FetchProjectItems: API error, serving stale cache", "err", err)
+					return stale.Schema, stale.Items, stale.PageInfo, nil
+				}
+			}
+		}
 		return ProjectSchema{}, nil, PageInfo{}, fmt.Errorf("FetchProjectItems: query: %w", err)
 	}
 
@@ -551,8 +591,8 @@ func FetchProjectItems(
 		newItems = append(newItems, parseProjectItem(node))
 	}
 
-	// Stitch new items onto any existing cached items (load-more).
-	allItems := append(existingItems, newItems...)
+	// Stitch new items onto any existing cached items (load-more) and sort into tree order.
+	allItems := TreeSortItems(append(existingItems, newItems...))
 
 	pageInfo := PageInfo{
 		HasNextPage: proj.Items.PageInfo.HasNextPage,
@@ -606,7 +646,7 @@ func fetchStatusFieldFallback(projectID, afterCursor string) (*StatusFieldDef, e
 			} `graphql:"node(id: $projectId)"`
 		}
 		vars := map[string]any{
-			"projectId":  graphql.String(projectID),
+			"projectId":  graphql.ID(projectID),
 			"fieldAfter": graphql.String(cursor),
 		}
 		if err := client.Query("FetchProjectFieldsFallback", &q, vars); err != nil {
@@ -729,18 +769,20 @@ func parseProjectItem(node gqlItemNode) ProjectItemData {
 	itemType := parseItemType(node.ItemType)
 
 	var title, repo, url string
+	var number, parentNumber int
 	switch itemType {
 	case ItemTypeIssue:
 		title = node.Content.AsIssue.Title
 		repo = node.Content.AsIssue.Repository.NameWithOwner
 		url = node.Content.AsIssue.Url
+		number = node.Content.AsIssue.Number
 	case ItemTypePullRequest:
 		title = node.Content.AsPR.Title
 		repo = node.Content.AsPR.Repository.NameWithOwner
 		url = node.Content.AsPR.Url
+		number = node.Content.AsPR.Number
 	case ItemTypeDraftIssue:
 		title = node.Content.AsDraftIssue.Title
-		// repo and url remain empty
 	case ItemTypeRedacted:
 		// all remain empty
 	}
@@ -751,17 +793,87 @@ func parseProjectItem(node gqlItemNode) ProjectItemData {
 		if fieldID != "" {
 			fields[fieldID] = fv
 		}
+		// Extract parent issue number from the built-in Parent issue field.
+		if fvNode.TypeName == "ProjectV2ItemFieldParentIssueValue" {
+			parentNumber = fvNode.AsParentIssue.Issue.Number
+		}
 	}
 
 	return ProjectItemData{
-		ID:        node.Id,
-		Type:      itemType,
-		Title:     title,
-		Repo:      repo,
-		URL:       url,
-		Fields:    fields,
-		UpdatedAt: node.UpdatedAt,
+		ID:           node.Id,
+		Type:         itemType,
+		Title:        title,
+		Repo:         repo,
+		URL:          url,
+		Number:       number,
+		ParentNumber: parentNumber,
+		Fields:       fields,
+		UpdatedAt:    node.UpdatedAt,
 	}
+}
+
+// TreeSortItems reorders items in DFS tree order (parent immediately above its
+// children) and assigns Depth to each item based on its ancestor chain within
+// this project's item set. Items whose parent is not present in the set are
+// treated as roots (depth 0).
+func TreeSortItems(items []ProjectItemData) []ProjectItemData {
+	// Build lookup: issue number → item index.
+	numToIdx := make(map[int]int, len(items))
+	for i, item := range items {
+		if item.Number != 0 {
+			numToIdx[item.Number] = i
+		}
+	}
+
+	// Compute depth for each item by walking parent chain.
+	depths := make([]int, len(items))
+	for i, item := range items {
+		depth := 0
+		cur := item.ParentNumber
+		visited := make(map[int]bool)
+		for cur != 0 && !visited[cur] {
+			visited[cur] = true
+			if _, ok := numToIdx[cur]; !ok {
+				break
+			}
+			depth++
+			cur = items[numToIdx[cur]].ParentNumber
+		}
+		depths[i] = depth
+	}
+
+	// Build children map: parent number → child indices (in original order).
+	children := make(map[int][]int, len(items))
+	var roots []int
+	for i, item := range items {
+		parent := item.ParentNumber
+		if parent == 0 {
+			roots = append(roots, i)
+			continue
+		}
+		if _, ok := numToIdx[parent]; ok {
+			children[parent] = append(children[parent], i)
+		} else {
+			roots = append(roots, i)
+		}
+	}
+
+	// DFS traversal to produce tree-ordered output.
+	result := make([]ProjectItemData, 0, len(items))
+	var dfs func(idx int)
+	dfs = func(idx int) {
+		item := items[idx]
+		item.Depth = depths[idx]
+		result = append(result, item)
+		for _, childIdx := range children[item.Number] {
+			dfs(childIdx)
+		}
+	}
+	for _, idx := range roots {
+		dfs(idx)
+	}
+
+	return result
 }
 
 // parseFieldValue converts a gqlFieldValueNode to a (fieldID, FieldValue) pair.
@@ -769,22 +881,22 @@ func parseProjectItem(node gqlItemNode) ProjectItemData {
 func parseFieldValue(node gqlFieldValueNode) (string, FieldValue) {
 	switch node.TypeName {
 	case "ProjectV2ItemFieldSingleSelectValue":
-		fieldID := node.AsSingleSelect.Field.Id
+		fieldID := fieldRefID(node.AsSingleSelect.Field)
 		return fieldID, FieldValueSingleSelect{
 			OptionID: node.AsSingleSelect.OptionId,
 			Name:     node.AsSingleSelect.Name,
 		}
 	case "ProjectV2ItemFieldNumberValue":
-		fieldID := node.AsNumber.Field.Id
+		fieldID := fieldRefID(node.AsNumber.Field)
 		if node.AsNumber.Number == nil {
 			return fieldID, FieldValueUnknown{}
 		}
 		return fieldID, FieldValueNumber{Number: *node.AsNumber.Number}
 	case "ProjectV2ItemFieldDateValue":
-		fieldID := node.AsDate.Field.Id
+		fieldID := fieldRefID(node.AsDate.Field)
 		return fieldID, FieldValueDate{Date: node.AsDate.Date}
 	case "ProjectV2ItemFieldIterationValue":
-		fieldID := node.AsIteration.Field.Id
+		fieldID := fieldRefID(node.AsIteration.Field)
 		return fieldID, FieldValueIteration{
 			IterationID: node.AsIteration.IterationId,
 			Title:       node.AsIteration.Title,
@@ -792,7 +904,7 @@ func parseFieldValue(node gqlFieldValueNode) (string, FieldValue) {
 			Duration:    node.AsIteration.Duration,
 		}
 	case "ProjectV2ItemFieldTextValue":
-		fieldID := node.AsText.Field.Id
+		fieldID := fieldRefID(node.AsText.Field)
 		return fieldID, FieldValueText{Text: node.AsText.Text}
 	default:
 		return "", FieldValueUnknown{}

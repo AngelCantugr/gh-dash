@@ -200,7 +200,11 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 
 	case ProjectItemsFetchedMsg:
 		m.isFetching = false
+		m.table.SetIsLoading(false)
 		if msg.Err != nil {
+			if m.ctx != nil {
+				m.ctx.Error = fmt.Errorf("failed to fetch project items: %w", msg.Err)
+			}
 			return m, nil
 		}
 		schema := msg.Schema
@@ -306,6 +310,18 @@ func (m *Model) LoadMore() tea.Cmd {
 	}
 	return m.FetchItems(true)
 }
+
+// Items returns the current items slice (used by projectsection for NumRows).
+func (m *Model) Items() []data.ProjectItemData { return m.items }
+
+// TableCurrItem / TableNextItem / TablePrevItem / TableFirstItem / TableLastItem
+// expose the items-view table cursor to projectsection so the root model's
+// navigation keys (j/k/g/G) operate on the drill-down table, not the projects list.
+func (m *Model) TableCurrItem() int  { return m.table.GetCurrItem() }
+func (m *Model) TableNextItem() int  { return m.table.NextItem() }
+func (m *Model) TablePrevItem() int  { return m.table.PrevItem() }
+func (m *Model) TableFirstItem() int { return m.table.FirstItem() }
+func (m *Model) TableLastItem() int  { return m.table.LastItem() }
 
 // GetCurrItem returns a pointer to the currently highlighted item.
 // Returns nil when the table is empty or has no selection.

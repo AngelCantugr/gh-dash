@@ -86,6 +86,62 @@ tasks:
       - prism test {{.CLI_ARGS}} ./...
     desc: Run tests
 
+  notify:
+    desc: "Run the PR notifier in the foreground (task notify -- --interval 2m)"
+    cmds:
+      - task: install
+      - gh dash notify {{.CLI_ARGS}}
+
+  notify:install:
+    desc: "Install the PR notifier as a launchd background agent. Customize with: task notify:install INTERVAL=2m"
+    vars:
+      INTERVAL: '{{.INTERVAL | default "5m"}}'
+      PLIST: "$HOME/Library/LaunchAgents/dev.gh-dash.notify.plist"
+    cmds:
+      - task: install
+      - |
+        GH="$(which gh)"
+        mkdir -p "$HOME/Library/LaunchAgents"
+        cat > "{{.PLIST}}" <<EOF
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+          <key>Label</key>
+          <string>dev.gh-dash.notify</string>
+          <key>ProgramArguments</key>
+          <array>
+            <string>${GH}</string>
+            <string>dash</string>
+            <string>notify</string>
+            <string>--interval</string>
+            <string>{{.INTERVAL}}</string>
+          </array>
+          <key>RunAtLoad</key>
+          <true/>
+          <key>KeepAlive</key>
+          <true/>
+          <key>StandardOutPath</key>
+          <string>/tmp/gh-dash-notify.log</string>
+          <key>StandardErrorPath</key>
+          <string>/tmp/gh-dash-notify.log</string>
+        </dict>
+        </plist>
+        EOF
+        launchctl load "{{.PLIST}}"
+        echo "✅ gh-dash notify agent installed (interval: {{.INTERVAL}})"
+        echo "   Logs: tail -f /tmp/gh-dash-notify.log"
+
+  notify:uninstall:
+    desc: "Stop and remove the PR notifier launchd agent"
+    vars:
+      PLIST: "$HOME/Library/LaunchAgents/dev.gh-dash.notify.plist"
+    cmds:
+      - launchctl unload "{{.PLIST}}" 2>/dev/null || true
+      - rm -f "{{.PLIST}}"
+      - rm -f "$HOME/Library/Caches/gh-dash/notify-state.json"
+      - echo "✅ gh-dash notify agent removed"
+
   fmt:
     desc: Run gofumpt
     cmds:

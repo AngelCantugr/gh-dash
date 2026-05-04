@@ -7,6 +7,7 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/log/v2"
 
 	"github.com/dlvhdr/gh-dash/v4/internal/config"
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
@@ -122,6 +123,12 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 		}
 
 	case tasks.UpdateIssueMsg:
+		// State changes (close/reopen) affect search results — invalidate cache.
+		if msg.IsClosed != nil {
+			if err := data.InvalidateIssuesCache(m.Ctx.ProjectsCache); err != nil {
+				log.Warn("issuessection: cache invalidation error", "err", err)
+			}
+		}
 		for i, currIssue := range m.Issues {
 			if currIssue.Number == msg.IssueNumber {
 				if msg.IsClosed != nil {
@@ -323,7 +330,7 @@ func (m *Model) FetchNextPageSectionRows() []tea.Cmd {
 		if limit == nil {
 			limit = &m.Ctx.Config.Defaults.IssuesLimit
 		}
-		res, err := data.FetchIssues(m.GetFilters(), *limit, m.PageInfo)
+		res, err := data.FetchIssues(m.Ctx.ProjectsCache, m.GetFilters(), *limit, m.PageInfo)
 		if err != nil {
 			return constants.TaskFinishedMsg{
 				SectionId:   m.Id,
@@ -381,7 +388,7 @@ func FetchAllSections(
 			fetchIssuesCmds,
 			sectionModel.FetchNextPageSectionRows()...)
 	}
-	return sections, tea.Batch(fetchIssuesCmds...)
+	return sections, constants.StaggerCmds(fetchIssuesCmds, 200*time.Millisecond)
 }
 
 type SectionIssuesFetchedMsg struct {

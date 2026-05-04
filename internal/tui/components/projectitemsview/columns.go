@@ -3,6 +3,7 @@ package projectitemsview
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -22,6 +23,15 @@ var (
 
 	growTrue = true
 )
+
+// indentPrefix returns the visual indentation string for a given nesting depth.
+// Each level adds "  └ " (2 spaces + tree connector) for the item itself.
+func indentPrefix(depth int) string {
+	if depth <= 0 {
+		return ""
+	}
+	return strings.Repeat("  ", depth-1) + "  └ "
+}
 
 // GetColumns returns the base column definitions for the items table.
 func GetColumns() []table.Column {
@@ -86,9 +96,16 @@ func BuildRows(ctx *context.ProgramContext, items []data.ProjectItemData, schema
 func buildRow(ctx *context.ProgramContext, item data.ProjectItemData, schema *data.ProjectSchema) table.Row {
 	textStyle := ctx.Styles.Common.MainTextStyle
 
-	title := textStyle.Render(item.Title)
+	titleText := item.Title
+	if titleText == "" {
+		titleText = "(untitled)"
+	}
+	indent := indentPrefix(item.Depth)
+	var title string
 	if item.Title == "" {
-		title = textStyle.Foreground(ctx.Theme.FaintText).Render("(untitled)")
+		title = textStyle.Foreground(ctx.Theme.FaintText).Render(indent + titleText)
+	} else {
+		title = textStyle.Render(indent + titleText)
 	}
 
 	typeStr := renderItemType(item.Type)

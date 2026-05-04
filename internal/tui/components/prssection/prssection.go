@@ -156,6 +156,12 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 		}
 
 	case tasks.UpdatePRMsg:
+		// State changes (close/reopen/merge) affect search results — invalidate cache.
+		if msg.IsClosed != nil || msg.IsMerged != nil || msg.ReadyForReview != nil {
+			if err := data.InvalidatePRsCache(m.Ctx.ProjectsCache); err != nil {
+				log.Warn("prssection: cache invalidation error", "err", err)
+			}
+		}
 		for i, currPr := range m.Prs {
 			if currPr.Primary.Number != msg.PrNumber {
 				continue
@@ -198,6 +204,8 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 
 	case SectionPullRequestsFetchedMsg:
 		if m.LastFetchTaskId == msg.TaskId {
+			prevCount := m.TotalCount
+			isRefresh := m.PageInfo != nil && prevCount > 0
 			if m.PageInfo != nil {
 				m.Prs = append(m.Prs, msg.Prs...)
 			} else {
@@ -209,6 +217,9 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 			m.Table.SetRows(m.BuildRows())
 			m.Table.UpdateLastUpdated(time.Now())
 			m.UpdateTotalItemsCount(m.TotalCount)
+			if isRefresh && msg.TotalCount > prevCount {
+				cmd = tea.Println("\a")
+			}
 		}
 	}
 
@@ -482,7 +493,7 @@ func (m *Model) FetchNextPageSectionRows() []tea.Cmd {
 			limit = &m.Ctx.Config.Defaults.PrsLimit
 		}
 
-		res, err := data.FetchPullRequests(m.GetFilters(), *limit, m.PageInfo)
+		res, err := data.FetchPullRequests(m.Ctx.ProjectsCache, m.GetFilters(), *limit, m.PageInfo)
 		if err != nil {
 			return constants.TaskFinishedMsg{
 				SectionId:   m.Id,
@@ -551,7 +562,7 @@ func FetchAllSections(
 			fetchPRsCmds,
 			sectionModel.FetchNextPageSectionRows()...)
 	}
-	return sections, tea.Batch(fetchPRsCmds...)
+	return sections, constants.StaggerCmds(fetchPRsCmds, 200*time.Millisecond)
 }
 
 func addAssignees(assignees, addedAssignees []data.Assignee) []data.Assignee {

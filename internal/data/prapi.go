@@ -1,7 +1,9 @@
 package data
 
 import (
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -14,8 +16,12 @@ import (
 	"github.com/shurcooL/githubv4"
 
 	"github.com/dlvhdr/gh-dash/v4/internal/config"
+	"github.com/dlvhdr/gh-dash/v4/internal/persistcache"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/theme"
 )
+
+func jsonMarshal(v any) ([]byte, error)   { return json.Marshal(v) }
+func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }
 
 type SuggestedReviewer struct {
 	IsAuthor    bool
@@ -490,7 +496,12 @@ func IsEnrichmentCacheCleared() bool {
 	return cachedClient == nil
 }
 
-func FetchPullRequests(query string, limit int, pageInfo *PageInfo) (PullRequestsResponse, error) {
+const prsCacheTTL = 30 * time.Minute
+
+// FetchPullRequests fetches PRs matching query. When cache is non-nil and
+// pageInfo is nil (first page), a cache hit is returned immediately and a
+// successful network response is written back to the cache.
+func FetchPullRequests(cache *persistcache.Store, query string, limit int, pageInfo *PageInfo) (PullRequestsResponse, error) {
 	var err error
 	if client == nil {
 		if config.IsFeatureEnabled(config.FF_MOCK_DATA) {
@@ -508,6 +519,21 @@ func FetchPullRequests(query string, limit int, pageInfo *PageInfo) (PullRequest
 
 	if err != nil {
 		return PullRequestsResponse{}, err
+	}
+
+	isFirstPage := pageInfo == nil
+	cacheKey := prsCacheKey(query, limit)
+
+	if isFirstPage && cache != nil {
+		if raw, hit, cerr := cache.Get(cacheKey); cerr != nil {
+			log.Warn("FetchPullRequests: cache read error", "key", cacheKey, "err", cerr)
+		} else if hit {
+			var cached PullRequestsResponse
+			if jsonErr := jsonUnmarshal(raw, &cached); jsonErr == nil {
+				log.Debug("FetchPullRequests: cache hit", "query", query, "count", len(cached.Prs))
+				return cached, nil
+			}
+		}
 	}
 
 	var queryResult struct {
@@ -531,6 +557,16 @@ func FetchPullRequests(query string, limit int, pageInfo *PageInfo) (PullRequest
 	log.Debug("Fetching PRs", "query", query, "limit", limit, "endCursor", endCursor)
 	err = client.Query("SearchPullRequests", &queryResult, variables)
 	if err != nil {
+		// On API error (e.g. rate limit), fall back to stale cache if available.
+		if isFirstPage && cache != nil {
+			if raw, hit, _ := cache.GetStale(cacheKey); hit {
+				var stale PullRequestsResponse
+				if jsonErr := jsonUnmarshal(raw, &stale); jsonErr == nil {
+					log.Warn("FetchPullRequests: API error, serving stale cache", "err", err)
+					return stale, nil
+				}
+			}
+		}
 		return PullRequestsResponse{}, err
 	}
 	log.Info("Successfully fetched PRs", "count", queryResult.Search.IssueCount)
@@ -540,11 +576,35 @@ func FetchPullRequests(query string, limit int, pageInfo *PageInfo) (PullRequest
 		prs = append(prs, node.PullRequest)
 	}
 
-	return PullRequestsResponse{
+	resp := PullRequestsResponse{
 		Prs:        prs,
 		TotalCount: queryResult.Search.IssueCount,
 		PageInfo:   queryResult.Search.PageInfo,
-	}, nil
+	}
+
+	if isFirstPage && cache != nil {
+		if raw, merr := jsonMarshal(resp); merr == nil {
+			if werr := cache.Put(cacheKey, raw, prsCacheTTL); werr != nil {
+				log.Warn("FetchPullRequests: cache write error", "key", cacheKey, "err", werr)
+			}
+		}
+	}
+
+	return resp, nil
+}
+
+// InvalidatePRsCache removes all cached PR responses so the next fetch is fresh.
+func InvalidatePRsCache(cache *persistcache.Store) error {
+	if cache == nil {
+		return nil
+	}
+	return cache.Invalidate("prs/")
+}
+
+// prsCacheKey returns a filesystem-safe cache key for a PR query+limit pair.
+func prsCacheKey(query string, limit int) string {
+	h := sha256.Sum256([]byte(fmt.Sprintf("%s|%d", query, limit)))
+	return fmt.Sprintf("prs/%x", h)
 }
 
 func FetchPullRequest(prUrl string) (EnrichedPullRequestData, error) {

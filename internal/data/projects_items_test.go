@@ -117,7 +117,7 @@ func TestParseFieldValue(t *testing.T) {
 				OptionId string
 				Name     string
 			}{
-				Field:    gqlFieldRef{Id: "FIELD_001"},
+				Field:    newFieldRef("FIELD_001"),
 				OptionId: "OPT_001",
 				Name:     "Todo",
 			},
@@ -138,7 +138,7 @@ func TestParseFieldValue(t *testing.T) {
 				Field  gqlFieldRef
 				Number *float64
 			}{
-				Field:  gqlFieldRef{Id: "FIELD_NUM"},
+				Field:  newFieldRef("FIELD_NUM"),
 				Number: &n,
 			},
 		}
@@ -156,7 +156,7 @@ func TestParseFieldValue(t *testing.T) {
 				Field  gqlFieldRef
 				Number *float64
 			}{
-				Field:  gqlFieldRef{Id: "FIELD_NUM"},
+				Field:  newFieldRef("FIELD_NUM"),
 				Number: nil,
 			},
 		}
@@ -173,7 +173,7 @@ func TestParseFieldValue(t *testing.T) {
 				Field gqlFieldRef
 				Date  string
 			}{
-				Field: gqlFieldRef{Id: "FIELD_DATE"},
+				Field: newFieldRef("FIELD_DATE"),
 				Date:  "2024-03-01",
 			},
 		}
@@ -194,7 +194,7 @@ func TestParseFieldValue(t *testing.T) {
 				StartDate   string
 				Duration    int
 			}{
-				Field:       gqlFieldRef{Id: "FIELD_ITER"},
+				Field:       newFieldRef("FIELD_ITER"),
 				IterationId: "ITER_42",
 				Title:       "Sprint 42",
 				StartDate:   "2024-04-01",
@@ -217,7 +217,7 @@ func TestParseFieldValue(t *testing.T) {
 				Field gqlFieldRef
 				Text  string
 			}{
-				Field: gqlFieldRef{Id: "FIELD_TEXT"},
+				Field: newFieldRef("FIELD_TEXT"),
 				Text:  "some text",
 			},
 		}
@@ -345,13 +345,13 @@ func buildFieldValueNodes() []gqlFieldValueNode {
 	n := 5.0
 	var ss gqlFieldValueNode
 	ss.TypeName = "ProjectV2ItemFieldSingleSelectValue"
-	ss.AsSingleSelect.Field.Id = "F_STATUS"
+	ss.AsSingleSelect.Field = newFieldRef("F_STATUS")
 	ss.AsSingleSelect.OptionId = "OPT_1"
 	ss.AsSingleSelect.Name = "Todo"
 
 	var num gqlFieldValueNode
 	num.TypeName = "ProjectV2ItemFieldNumberValue"
-	num.AsNumber.Field.Id = "F_NUM"
+	num.AsNumber.Field = newFieldRef("F_NUM")
 	num.AsNumber.Number = &n
 
 	return []gqlFieldValueNode{ss, num}

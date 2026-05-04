@@ -526,6 +526,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case key.Matches(msg, m.keys.OpenGithub):
 				cmds = append(cmds, m.openBrowser())
 
+			case key.Matches(msg, keys.ProjectKeys.SwitchView):
+				cmds = append(cmds, m.switchSelectedView())
+
 			case key.Matches(msg, keys.ProjectKeys.Refresh):
 				if currSection != nil {
 					if err := projectsection.InvalidateCaches(m.ctx.ProjectsCache); err != nil {
@@ -734,6 +737,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				log.Error("Task finished with error", "id", task.Id, "err", msg.Err)
 				task.State = context.TaskError
 				task.Error = msg.Err
+				// Stop the loading spinner on the affected section so it doesn't freeze.
+				m.stopSectionLoading(msg.SectionId, msg.SectionType)
 			} else {
 				task.State = context.TaskFinished
 			}
@@ -842,6 +847,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case constants.ClearTaskMsg:
 		m.footer.SetRightSection("")
 		delete(m.tasks, msg.TaskId)
+
+	case constants.StaggeredCmdMsg:
+		cmds = append(cmds, msg.Cmd)
 
 	case section.SectionMsg:
 		cmd = m.updateRelevantSection(msg)
@@ -1125,6 +1133,25 @@ func (m *Model) updateSection(id int, sType string, msg tea.Msg) (cmd tea.Cmd) {
 	}
 
 	return cmd
+}
+
+// stopSectionLoading clears the loading spinner on a section after a task error
+// so the UI doesn't freeze waiting for a fetch that will never complete.
+func (m *Model) stopSectionLoading(id int, sType string) {
+	switch sType {
+	case prssection.SectionType:
+		if id < len(m.prs) && m.prs[id] != nil {
+			m.prs[id].(*prssection.Model).SetIsLoading(false)
+		}
+	case issuessection.SectionType:
+		if id < len(m.issues) && m.issues[id] != nil {
+			m.issues[id].(*issuessection.Model).SetIsLoading(false)
+		}
+	case projectsection.SectionType:
+		if id < len(m.projects) && m.projects[id] != nil {
+			m.projects[id].SetIsLoading(false)
+		}
+	}
 }
 
 func (m *Model) updateRelevantSection(msg section.SectionMsg) (cmd tea.Cmd) {

@@ -1,6 +1,7 @@
 package data
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"net/url"
 	"time"
@@ -10,6 +11,7 @@ import (
 	graphql "github.com/cli/shurcooL-graphql"
 	"github.com/shurcooL/githubv4"
 
+	"github.com/dlvhdr/gh-dash/v4/internal/persistcache"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/theme"
 )
 
@@ -99,7 +101,12 @@ func makeIssuesQuery(query string) string {
 	return fmt.Sprintf("is:issue archived:false %s sort:updated", query)
 }
 
-func FetchIssues(query string, limit int, pageInfo *PageInfo) (IssuesResponse, error) {
+const issuesCacheTTL = 30 * time.Minute
+
+// FetchIssues fetches issues matching query. When cache is non-nil and
+// pageInfo is nil (first page), a cache hit is returned immediately and a
+// successful network response is written back to the cache.
+func FetchIssues(cache *persistcache.Store, query string, limit int, pageInfo *PageInfo) (IssuesResponse, error) {
 	var err error
 	if client == nil {
 		client, err = gh.DefaultGraphQLClient()
@@ -107,6 +114,21 @@ func FetchIssues(query string, limit int, pageInfo *PageInfo) (IssuesResponse, e
 
 	if err != nil {
 		return IssuesResponse{}, err
+	}
+
+	isFirstPage := pageInfo == nil
+	cacheKey := issuesCacheKey(query, limit)
+
+	if isFirstPage && cache != nil {
+		if raw, hit, cerr := cache.Get(cacheKey); cerr != nil {
+			log.Warn("FetchIssues: cache read error", "key", cacheKey, "err", cerr)
+		} else if hit {
+			var cached IssuesResponse
+			if jsonErr := jsonUnmarshal(raw, &cached); jsonErr == nil {
+				log.Debug("FetchIssues: cache hit", "query", query, "count", len(cached.Issues))
+				return cached, nil
+			}
+		}
 	}
 
 	var queryResult struct {
@@ -130,6 +152,16 @@ func FetchIssues(query string, limit int, pageInfo *PageInfo) (IssuesResponse, e
 	log.Debug("Fetching issues", "query", query, "limit", limit, "endCursor", endCursor)
 	err = client.Query("SearchIssues", &queryResult, variables)
 	if err != nil {
+		// On API error (e.g. rate limit), fall back to stale cache if available.
+		if isFirstPage && cache != nil {
+			if raw, hit, _ := cache.GetStale(cacheKey); hit {
+				var stale IssuesResponse
+				if jsonErr := jsonUnmarshal(raw, &stale); jsonErr == nil {
+					log.Warn("FetchIssues: API error, serving stale cache", "err", err)
+					return stale, nil
+				}
+			}
+		}
 		return IssuesResponse{}, err
 	}
 	log.Info("Successfully fetched issues", "query", query, "count", queryResult.Search.IssueCount)
@@ -139,11 +171,35 @@ func FetchIssues(query string, limit int, pageInfo *PageInfo) (IssuesResponse, e
 		issues = append(issues, node.Issue)
 	}
 
-	return IssuesResponse{
+	resp := IssuesResponse{
 		Issues:     issues,
 		TotalCount: queryResult.Search.IssueCount,
 		PageInfo:   queryResult.Search.PageInfo,
-	}, nil
+	}
+
+	if isFirstPage && cache != nil {
+		if raw, merr := jsonMarshal(resp); merr == nil {
+			if werr := cache.Put(cacheKey, raw, issuesCacheTTL); werr != nil {
+				log.Warn("FetchIssues: cache write error", "key", cacheKey, "err", werr)
+			}
+		}
+	}
+
+	return resp, nil
+}
+
+// InvalidateIssuesCache removes all cached issue responses so the next fetch is fresh.
+func InvalidateIssuesCache(cache *persistcache.Store) error {
+	if cache == nil {
+		return nil
+	}
+	return cache.Invalidate("issues/")
+}
+
+// issuesCacheKey returns a filesystem-safe cache key for an issues query+limit pair.
+func issuesCacheKey(query string, limit int) string {
+	h := sha256.Sum256([]byte(fmt.Sprintf("%s|%d", query, limit)))
+	return fmt.Sprintf("issues/%x", h)
 }
 
 type IssuesResponse struct {

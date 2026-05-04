@@ -16,6 +16,7 @@ type ProjectKeyMap struct {
 	LoadMore   key.Binding // >     — load more items (inside items view)
 	Back       key.Binding // esc/b — return to projects list (inside items view)
 	EditStatus key.Binding // S     — open status picker for the selected item
+	SwitchView key.Binding // s     — switch to next view
 }
 
 var ProjectKeys = ProjectKeyMap{
@@ -42,6 +43,10 @@ var ProjectKeys = ProjectKeyMap{
 	EditStatus: key.NewBinding(
 		key.WithKeys("S"),
 		key.WithHelp("S", "edit status"),
+	),
+	SwitchView: key.NewBinding(
+		key.WithKeys("s"),
+		key.WithHelp("s", "switch view"),
 	),
 }
 
