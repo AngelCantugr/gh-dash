@@ -327,9 +327,15 @@ const (
 // GitHub changed the type of .field on item field-value nodes from a concrete
 // type to this union, so each variant must be addressed with an inline fragment.
 type gqlFieldRef struct {
-	AsField        struct{ Id string `graphql:"id"` } `graphql:"... on ProjectV2Field"`
-	AsSingleSelect struct{ Id string `graphql:"id"` } `graphql:"... on ProjectV2SingleSelectField"`
-	AsIteration    struct{ Id string `graphql:"id"` } `graphql:"... on ProjectV2IterationField"`
+	AsField struct {
+		Id string `graphql:"id"`
+	} `graphql:"... on ProjectV2Field"`
+	AsSingleSelect struct {
+		Id string `graphql:"id"`
+	} `graphql:"... on ProjectV2SingleSelectField"`
+	AsIteration struct {
+		Id string `graphql:"id"`
+	} `graphql:"... on ProjectV2IterationField"`
 }
 
 // fieldRefID returns the id from whichever union variant was populated.

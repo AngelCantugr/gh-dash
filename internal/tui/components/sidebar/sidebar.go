@@ -47,9 +47,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 
 	case tea.MouseWheelMsg:
-		if msg.Button == tea.MouseWheelDown {
+		switch msg.Button {
+		case tea.MouseWheelDown:
 			m.viewport.ScrollDown(3)
-		} else if msg.Button == tea.MouseWheelUp {
+		case tea.MouseWheelUp:
 			m.viewport.ScrollUp(3)
 		}
 	}

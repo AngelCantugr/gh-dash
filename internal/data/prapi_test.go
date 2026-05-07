@@ -78,3 +78,81 @@ func TestSetClient(t *testing.T) {
 		require.True(t, IsEnrichmentCacheCleared())
 	})
 }
+
+func TestExtractQueuedFilter(t *testing.T) {
+	tests := []struct {
+		name      string
+		filter    string
+		wantClean string
+		wantMode  QueuedMode
+	}{
+		{
+			name:      "empty filter",
+			filter:    "",
+			wantClean: "",
+			wantMode:  QueuedAny,
+		},
+		{
+			name:      "no queued token",
+			filter:    "is:open author:@me",
+			wantClean: "is:open author:@me",
+			wantMode:  QueuedAny,
+		},
+		{
+			name:      "is:queued only",
+			filter:    "is:queued",
+			wantClean: "",
+			wantMode:  QueuedOnly,
+		},
+		{
+			name:      "negated is:queued only",
+			filter:    "-is:queued",
+			wantClean: "",
+			wantMode:  QueuedExcluded,
+		},
+		{
+			name:      "is:queued mixed with other tokens",
+			filter:    "author:@me is:queued label:bug",
+			wantClean: "author:@me label:bug",
+			wantMode:  QueuedOnly,
+		},
+		{
+			name:      "negated mixed with other tokens",
+			filter:    "is:open -is:queued label:wip",
+			wantClean: "is:open label:wip",
+			wantMode:  QueuedExcluded,
+		},
+		{
+			name:      "both tokens last wins (only)",
+			filter:    "-is:queued is:queued",
+			wantClean: "",
+			wantMode:  QueuedOnly,
+		},
+		{
+			name:      "both tokens last wins (excluded)",
+			filter:    "is:queued -is:queued",
+			wantClean: "",
+			wantMode:  QueuedExcluded,
+		},
+		{
+			name:      "multiple is:queued occurrences",
+			filter:    "is:queued repo:foo/bar is:queued",
+			wantClean: "repo:foo/bar",
+			wantMode:  QueuedOnly,
+		},
+		{
+			name:      "extra whitespace is normalized",
+			filter:    "  is:open   is:queued  ",
+			wantClean: "is:open",
+			wantMode:  QueuedOnly,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotClean, gotMode := ExtractQueuedFilter(tt.filter)
+			require.Equal(t, tt.wantClean, gotClean)
+			require.Equal(t, tt.wantMode, gotMode)
+		})
+	}
+}
