@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -26,6 +27,7 @@ type UpdatePRMsg struct {
 	NewComment       *data.Comment
 	ReadyForReview   *bool
 	IsMerged         *bool
+	IsInMergeQueue   *bool
 	AddedAssignees   *data.Assignees
 	RemovedAssignees *data.Assignees
 	Labels           *data.PRLabels
@@ -166,13 +168,14 @@ func PRReady(ctx *context.ProgramContext, section SectionIdentifier, pr data.Row
 
 func MergePR(ctx *context.ProgramContext, section SectionIdentifier, pr data.RowData) tea.Cmd {
 	prNumber := pr.GetNumber()
+	repo := pr.GetRepoNameWithOwner()
 	c := exec.Command(
 		"gh",
 		"pr",
 		"merge",
 		fmt.Sprint(prNumber),
 		"-R",
-		pr.GetRepoNameWithOwner(),
+		repo,
 	)
 
 	taskId := fmt.Sprintf("merge_%d", prNumber)
@@ -186,19 +189,74 @@ func MergePR(ctx *context.ProgramContext, section SectionIdentifier, pr data.Row
 	startCmd := ctx.StartTask(task)
 
 	return tea.Batch(startCmd, tea.ExecProcess(c, func(err error) tea.Msg {
-		isMerged := err == nil && c.ProcessState.ExitCode() == 0
+		mergeOK := err == nil && c.ProcessState.ExitCode() == 0
+		msg := UpdatePRMsg{PrNumber: prNumber}
+
+		if !mergeOK {
+			isMerged := false
+			msg.IsMerged = &isMerged
+		} else {
+			// `gh pr merge` returns success both when the PR merges immediately
+			// and when it gets enqueued in a merge queue. The CLI doesn't
+			// surface which happened, and `gh pr view --json` does not expose
+			// `isInMergeQueue` — fall back to a raw GraphQL probe so the local
+			// state reflects the queued case instead of flashing MERGED.
+			state, queued, queryErr := fetchPRMergeState(repo, prNumber)
+			if queryErr != nil {
+				log.Warn("MergePR: post-merge state probe failed", "pr", prNumber, "err", queryErr)
+				isMerged := true
+				msg.IsMerged = &isMerged
+			} else {
+				isMerged := state == "MERGED"
+				msg.IsMerged = &isMerged
+				msg.IsInMergeQueue = &queued
+			}
+		}
 
 		return constants.TaskFinishedMsg{
 			SectionId:   section.Id,
 			SectionType: section.Type,
 			TaskId:      taskId,
 			Err:         err,
-			Msg: UpdatePRMsg{
-				PrNumber: prNumber,
-				IsMerged: &isMerged,
-			},
+			Msg:         msg,
 		}
 	}))
+}
+
+// fetchPRMergeState runs `gh api graphql` to read the PR's state and merge-queue
+// membership. Returns ("", false, err) on failure so callers can fall back.
+func fetchPRMergeState(repoNameWithOwner string, prNumber int) (string, bool, error) {
+	owner, name, ok := strings.Cut(repoNameWithOwner, "/")
+	if !ok {
+		return "", false, fmt.Errorf("invalid repo %q", repoNameWithOwner)
+	}
+	query := `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){state isInMergeQueue}}}`
+	c := exec.Command(
+		"gh", "api", "graphql",
+		"-f", "query="+query,
+		"-F", "owner="+owner,
+		"-F", "name="+name,
+		"-F", fmt.Sprintf("number=%d", prNumber),
+	)
+	out, err := c.Output()
+	if err != nil {
+		return "", false, err
+	}
+	var resp struct {
+		Data struct {
+			Repository struct {
+				PullRequest struct {
+					State          string `json:"state"`
+					IsInMergeQueue bool   `json:"isInMergeQueue"`
+				} `json:"pullRequest"`
+			} `json:"repository"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil {
+		return "", false, err
+	}
+	pr := resp.Data.Repository.PullRequest
+	return pr.State, pr.IsInMergeQueue, nil
 }
 
 func CreatePR(

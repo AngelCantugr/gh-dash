@@ -348,3 +348,76 @@ func TestRenderLabels(t *testing.T) {
 		})
 	}
 }
+
+func TestRenderState(t *testing.T) {
+	tests := []struct {
+		name           string
+		state          string
+		isDraft        bool
+		isInMergeQueue bool
+		wantIcon       string
+		wantLabel      string
+	}{
+		{
+			name:      "open",
+			state:     "OPEN",
+			wantIcon:  constants.OpenIcon,
+			wantLabel: "Open",
+		},
+		{
+			name:      "draft",
+			state:     "OPEN",
+			isDraft:   true,
+			wantIcon:  constants.DraftIcon,
+			wantLabel: "Draft",
+		},
+		{
+			name:           "queued takes precedence over draft",
+			state:          "OPEN",
+			isDraft:        true,
+			isInMergeQueue: true,
+			wantIcon:       constants.MergeQueueIcon,
+			wantLabel:      "Queued",
+		},
+		{
+			name:           "queued open",
+			state:          "OPEN",
+			isInMergeQueue: true,
+			wantIcon:       constants.MergeQueueIcon,
+			wantLabel:      "Queued",
+		},
+		{
+			name:      "closed",
+			state:     "CLOSED",
+			wantIcon:  constants.ClosedIcon,
+			wantLabel: "Closed",
+		},
+		{
+			name:      "merged",
+			state:     "MERGED",
+			wantIcon:  constants.MergedIcon,
+			wantLabel: "Merged",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pr := &PullRequest{
+				Data: &Data{
+					Primary: &data.PullRequestData{
+						State:          tt.state,
+						IsDraft:        tt.isDraft,
+						IsInMergeQueue: tt.isInMergeQueue,
+					},
+				},
+			}
+			got := pr.RenderState()
+			if !strings.Contains(got, tt.wantIcon) {
+				t.Errorf("RenderState() = %q, want icon %q", got, tt.wantIcon)
+			}
+			if !strings.Contains(got, tt.wantLabel) {
+				t.Errorf("RenderState() = %q, want label %q", got, tt.wantLabel)
+			}
+		})
+	}
+}

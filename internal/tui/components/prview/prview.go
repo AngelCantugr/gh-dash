@@ -263,9 +263,12 @@ func (m *Model) renderStatusPill() string {
 	var bgColor color.Color
 	switch m.pr.Data.Primary.State {
 	case "OPEN":
-		if m.pr.Data.Primary.IsDraft {
+		switch {
+		case m.pr.Data.Primary.IsInMergeQueue:
+			bgColor = m.ctx.Theme.WarningText.Dark
+		case m.pr.Data.Primary.IsDraft:
 			bgColor = m.ctx.Theme.FaintText.Dark
-		} else {
+		default:
 			bgColor = m.ctx.Styles.Colors.OpenPR.Dark
 		}
 	case "CLOSED":

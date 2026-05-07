@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"charm.land/log/v2"
@@ -32,13 +33,14 @@ type SuggestedReviewer struct {
 }
 
 type EnrichedPullRequestData struct {
-	Url     string
-	Number  int
-	Title   string
-	Body    string
-	State   string
-	IsDraft bool
-	Author  struct {
+	Url            string
+	Number         int
+	Title          string
+	Body           string
+	State          string
+	IsDraft        bool
+	IsInMergeQueue bool
+	Author         struct {
 		Login string
 	}
 	AuthorAssociation string
@@ -636,4 +638,38 @@ func FetchPullRequest(prUrl string) (EnrichedPullRequestData, error) {
 	log.Info("Successfully fetched PR", "url", prUrl)
 
 	return queryResult.Resource.PullRequest, nil
+}
+
+// QueuedMode is a client-side filter mode for narrowing PR results by their
+// merge-queue membership. GitHub's search syntax does not expose merge-queue
+// status, so this filter is applied after the GraphQL fetch.
+type QueuedMode int
+
+const (
+	// QueuedAny means no merge-queue filter token was present; pass all PRs.
+	QueuedAny QueuedMode = iota
+	// QueuedOnly means `is:queued` was present; keep only PRs in a merge queue.
+	QueuedOnly
+	// QueuedExcluded means `-is:queued` was present; drop PRs in a merge queue.
+	QueuedExcluded
+)
+
+// ExtractQueuedFilter peels `is:queued` and `-is:queued` tokens out of a
+// GitHub search filter string, returning the cleaned filter and the resulting
+// QueuedMode. When both tokens appear, the last one wins (mirrors how GitHub
+// search treats duplicate `is:` predicates).
+func ExtractQueuedFilter(filter string) (string, QueuedMode) {
+	mode := QueuedAny
+	remaining := make([]string, 0)
+	for _, token := range strings.Fields(filter) {
+		switch token {
+		case "is:queued":
+			mode = QueuedOnly
+		case "-is:queued":
+			mode = QueuedExcluded
+		default:
+			remaining = append(remaining, token)
+		}
+	}
+	return strings.Join(remaining, " "), mode
 }

@@ -196,6 +196,9 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 				currPr.Primary.State = "MERGED"
 				currPr.Primary.Mergeable = ""
 			}
+			if msg.IsInMergeQueue != nil {
+				currPr.Primary.IsInMergeQueue = *msg.IsInMergeQueue
+			}
 			m.Prs[i] = currPr
 			m.SetIsLoading(false)
 			m.Table.SetRows(m.BuildRows())
@@ -493,7 +496,8 @@ func (m *Model) FetchNextPageSectionRows() []tea.Cmd {
 			limit = &m.Ctx.Config.Defaults.PrsLimit
 		}
 
-		res, err := data.FetchPullRequests(m.Ctx.ProjectsCache, m.GetFilters(), *limit, m.PageInfo)
+		cleanedFilters, queuedMode := data.ExtractQueuedFilter(m.GetFilters())
+		res, err := data.FetchPullRequests(m.Ctx.ProjectsCache, cleanedFilters, *limit, m.PageInfo)
 		if err != nil {
 			return constants.TaskFinishedMsg{
 				SectionId:   m.Id,
@@ -503,8 +507,18 @@ func (m *Model) FetchNextPageSectionRows() []tea.Cmd {
 			}
 		}
 
-		prs := make([]prrow.Data, 0)
+		prs := make([]prrow.Data, 0, len(res.Prs))
 		for _, pr := range res.Prs {
+			switch queuedMode {
+			case data.QueuedOnly:
+				if !pr.IsInMergeQueue {
+					continue
+				}
+			case data.QueuedExcluded:
+				if pr.IsInMergeQueue {
+					continue
+				}
+			}
 			prs = append(prs, prrow.Data{Primary: &pr})
 		}
 		return constants.TaskFinishedMsg{
