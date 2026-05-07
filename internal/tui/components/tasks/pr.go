@@ -192,25 +192,22 @@ func MergePR(ctx *context.ProgramContext, section SectionIdentifier, pr data.Row
 		mergeOK := err == nil && c.ProcessState.ExitCode() == 0
 		msg := UpdatePRMsg{PrNumber: prNumber}
 
-		if !mergeOK {
-			isMerged := false
+		// Probe the PR's state regardless of merge exit code. `gh pr merge`
+		// returns non-zero when a PR is already merged or otherwise can't be
+		// re-merged, but the underlying state on GitHub is still authoritative
+		// — and on success we still need this probe because the CLI doesn't
+		// distinguish between an immediate merge and getting enqueued, and
+		// `gh pr view --json` doesn't expose `isInMergeQueue`.
+		state, queued, queryErr := fetchPRMergeState(repo, prNumber)
+		if queryErr != nil {
+			log.Warn("MergePR: post-merge state probe failed", "pr", prNumber, "err", queryErr)
+			// Fall back to the merge exit code when we have nothing better.
+			isMerged := mergeOK
 			msg.IsMerged = &isMerged
 		} else {
-			// `gh pr merge` returns success both when the PR merges immediately
-			// and when it gets enqueued in a merge queue. The CLI doesn't
-			// surface which happened, and `gh pr view --json` does not expose
-			// `isInMergeQueue` — fall back to a raw GraphQL probe so the local
-			// state reflects the queued case instead of flashing MERGED.
-			state, queued, queryErr := fetchPRMergeState(repo, prNumber)
-			if queryErr != nil {
-				log.Warn("MergePR: post-merge state probe failed", "pr", prNumber, "err", queryErr)
-				isMerged := true
-				msg.IsMerged = &isMerged
-			} else {
-				isMerged := state == "MERGED"
-				msg.IsMerged = &isMerged
-				msg.IsInMergeQueue = &queued
-			}
+			isMerged := state == "MERGED"
+			msg.IsMerged = &isMerged
+			msg.IsInMergeQueue = &queued
 		}
 
 		return constants.TaskFinishedMsg{

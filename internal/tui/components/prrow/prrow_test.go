@@ -412,11 +412,16 @@ func TestRenderState(t *testing.T) {
 				},
 			}
 			got := pr.RenderState()
-			if !strings.Contains(got, tt.wantIcon) {
-				t.Errorf("RenderState() = %q, want icon %q", got, tt.wantIcon)
+			iconIdx := strings.Index(got, tt.wantIcon)
+			if iconIdx < 0 {
+				t.Fatalf("RenderState() = %q, want icon %q", got, tt.wantIcon)
 			}
-			if !strings.Contains(got, tt.wantLabel) {
-				t.Errorf("RenderState() = %q, want label %q", got, tt.wantLabel)
+			labelIdx := strings.Index(got, tt.wantLabel)
+			if labelIdx < 0 {
+				t.Fatalf("RenderState() = %q, want label %q", got, tt.wantLabel)
+			}
+			if iconIdx >= labelIdx {
+				t.Errorf("RenderState() = %q, want icon %q to appear before label %q", got, tt.wantIcon, tt.wantLabel)
 			}
 		})
 	}
