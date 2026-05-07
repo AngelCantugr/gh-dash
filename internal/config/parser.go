@@ -756,7 +756,7 @@ func (parser ConfigParser) getProvidedConfigPath(location Location) string {
 
 // getAllowedKeys extracts the set of yaml field names from a struct type using reflection.
 func getAllowedKeys(t reflect.Type) map[string]bool {
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	allowed := make(map[string]bool, t.NumField())
