@@ -180,16 +180,17 @@ func MergePR(ctx *context.ProgramContext, section SectionIdentifier, pr data.Row
 
 	taskId := fmt.Sprintf("merge_%d", prNumber)
 	task := context.Task{
-		Id:           taskId,
-		StartText:    fmt.Sprintf("Merging PR #%d", prNumber),
-		FinishedText: fmt.Sprintf("PR #%d has been merged", prNumber),
+		Id:        taskId,
+		StartText: fmt.Sprintf("Merging PR #%d", prNumber),
+		// Neutral wording: with a required merge queue the command only
+		// enqueues the PR, so "has been merged" would be wrong.
+		FinishedText: fmt.Sprintf("PR #%d merge requested", prNumber),
 		State:        context.TaskStart,
 		Error:        nil,
 	}
 	startCmd := ctx.StartTask(task)
 
 	return tea.Batch(startCmd, tea.ExecProcess(c, func(err error) tea.Msg {
-		mergeOK := err == nil && c.ProcessState.ExitCode() == 0
 		msg := UpdatePRMsg{PrNumber: prNumber}
 
 		// Probe the PR's state regardless of merge exit code. `gh pr merge`
@@ -201,9 +202,10 @@ func MergePR(ctx *context.ProgramContext, section SectionIdentifier, pr data.Row
 		state, queued, queryErr := fetchPRMergeState(repo, prNumber)
 		if queryErr != nil {
 			log.Warn("MergePR: post-merge state probe failed", "pr", prNumber, "err", queryErr)
-			// Fall back to the merge exit code when we have nothing better.
-			isMerged := mergeOK
-			msg.IsMerged = &isMerged
+			// Don't infer MERGED from the merge exit code: in repos with a
+			// required merge queue, `gh pr merge` exits 0 when the PR is only
+			// *enqueued*. Leave the row's state unchanged — the next fetch
+			// will show the authoritative state.
 		} else {
 			isMerged := state == "MERGED"
 			msg.IsMerged = &isMerged

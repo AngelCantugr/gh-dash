@@ -73,6 +73,9 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 				m.SyncSmartFilterWithSearchValue()
 				m.SetIsSearching(false)
 				m.ResetRows()
+				// The query changed: the old count is not a valid "new PRs"
+				// baseline, so don't let the bell compare against it.
+				m.TotalCount = 0
 				return m, tea.Batch(m.FetchNextPageSectionRows()...)
 			}
 
@@ -142,6 +145,8 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 				m.SearchBar.SetValue(searchValue)
 				m.SetIsSearching(false)
 				m.ResetRows()
+				// Query changed — invalidate the "new PRs" bell baseline.
+				m.TotalCount = 0
 				return m, tea.Batch(m.FetchNextPageSectionRows()...)
 			}
 
@@ -208,7 +213,10 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 	case SectionPullRequestsFetchedMsg:
 		if m.LastFetchTaskId == msg.TaskId {
 			prevCount := m.TotalCount
-			isRefresh := m.PageInfo != nil && prevCount > 0
+			// A refresh is a first-page fetch (PageInfo reset to nil) on a
+			// section that already had a count. Pagination (PageInfo != nil)
+			// never grows TotalCount, so it can't ring the bell.
+			isRefresh := m.PageInfo == nil && prevCount > 0
 			if m.PageInfo != nil {
 				m.Prs = append(m.Prs, msg.Prs...)
 			} else {
@@ -567,6 +575,11 @@ func FetchAllSections(
 			oldSection := prs[i+1].(*Model)
 			sectionModel.Prs = oldSection.Prs
 			sectionModel.LastFetchTaskId = oldSection.LastFetchTaskId
+			// Carry the previous count so the fetched-msg handler can detect
+			// newly arrived PRs across an interval refresh (PageInfo is
+			// deliberately NOT carried — that would turn the refresh into a
+			// pagination append).
+			sectionModel.TotalCount = oldSection.TotalCount
 		}
 		if sectionConfig.Layout.AuthorIcon.Hidden != nil {
 			sectionModel.ShowAuthorIcon = !*sectionConfig.Layout.AuthorIcon.Hidden
