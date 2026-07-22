@@ -729,8 +729,17 @@ func TestTreeSortItems_CycleChildStillNested(t *testing.T) {
 
 	require.Len(t, sorted, 3)
 	idx := make(map[string]int)
+	byID := make(map[string]ProjectItemData)
 	for i, it := range sorted {
 		idx[it.ID] = i
+		byID[it.ID] = it
 	}
 	assert.Greater(t, idx["leaf"], idx["a"], "leaf must come after its parent a")
+
+	// Regression: depth must come from the DFS traversal (parent's emitted
+	// depth + 1), not from walking parentKey links directly — the latter
+	// walks through the whole a<->b cycle before "visited" stops it,
+	// inflating leaf's depth to 2 even though it renders one level under a.
+	assert.Equal(t, 0, byID["a"].Depth, "cycle member chosen as synthetic root must be depth 0")
+	assert.Equal(t, 1, byID["leaf"].Depth, "leaf is a direct child of a and must be depth 1, not inflated by the a<->b cycle")
 }

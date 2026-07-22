@@ -262,21 +262,12 @@ func (m *Model) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
-// FetchItems starts an async fetch. When appendMode is true the results are
-// appended to the existing items slice (load-more); otherwise they replace it.
-func (m *Model) FetchItems(appendMode bool) tea.Cmd {
-	if m.isFetching {
-		m.table.SetIsLoading(true) // keep spinner visible as no-op hint
-		return nil
-	}
-	m.isFetching = true
-	m.table.SetIsLoading(true)
-
-	after := ""
-	if appendMode && m.pageInfo != nil {
-		after = m.pageInfo.EndCursor
-	}
-
+// fetchCmd builds the async fetch command. When invalidate is true, the
+// cache invalidation also happens inside this goroutine (not before it is
+// returned) — Invalidate does blocking disk I/O (a directory walk plus file
+// removal), and running it synchronously in Update would stall the whole
+// TUI event loop until the walk completes.
+func (m *Model) fetchCmd(after string, appendMode, invalidate bool) tea.Cmd {
 	// Capture values for the closure — avoid capturing m directly.
 	projectID := m.projectID
 	extraFieldNames := m.extraFieldNames
@@ -286,6 +277,12 @@ func (m *Model) FetchItems(appendMode bool) tea.Cmd {
 	}
 
 	return func() tea.Msg {
+		if invalidate && cache != nil {
+			cacheKey := "project-items/" + projectID
+			if err := cache.Invalidate(cacheKey); err != nil {
+				log.Warn("projectitemsview: refresh cache invalidation", "key", cacheKey, "err", err)
+			}
+		}
 		schema, items, pageInfo, err := data.FetchProjectItems(
 			cache,
 			projectID,
@@ -303,17 +300,36 @@ func (m *Model) FetchItems(appendMode bool) tea.Cmd {
 	}
 }
 
+// FetchItems starts an async fetch. When appendMode is true the results are
+// appended to the existing items slice (load-more); otherwise they replace it.
+func (m *Model) FetchItems(appendMode bool) tea.Cmd {
+	if m.isFetching {
+		m.table.SetIsLoading(true) // keep spinner visible as no-op hint
+		return nil
+	}
+	m.isFetching = true
+	m.table.SetIsLoading(true)
+
+	after := ""
+	if appendMode && m.pageInfo != nil {
+		after = m.pageInfo.EndCursor
+	}
+
+	return m.fetchCmd(after, appendMode, false)
+}
+
 // Refresh invalidates this project's cached items and refetches the first
 // page from the network. A plain FetchItems(false) would serve the disk cache
 // within its TTL, making an explicit refresh a no-op.
 func (m *Model) Refresh() tea.Cmd {
-	if m.ctx != nil && m.ctx.ProjectsCache != nil {
-		cacheKey := "project-items/" + m.projectID
-		if err := m.ctx.ProjectsCache.Invalidate(cacheKey); err != nil {
-			log.Warn("projectitemsview: refresh cache invalidation", "key", cacheKey, "err", err)
-		}
+	if m.isFetching {
+		m.table.SetIsLoading(true)
+		return nil
 	}
-	return m.FetchItems(false)
+	m.isFetching = true
+	m.table.SetIsLoading(true)
+
+	return m.fetchCmd("", false, true)
 }
 
 // LoadMore fetches the next page of items if there is one.

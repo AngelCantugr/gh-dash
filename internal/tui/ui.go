@@ -271,7 +271,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// In a drilled-down projects section, NumRows counts the
 					// items list, so auto-pagination must load more items —
 					// not another page of projects.
-					if projSection, ok := currSection.(*projectsection.Model); ok && projSection.IsDrilledDown() {
+					if projSection := drilledDownProjectSection(currSection); projSection != nil {
 						cmds = append(cmds, projSection.FetchNextItemsPage())
 					} else {
 						cmds = append(cmds, currSection.FetchNextPageSectionRows()...)
@@ -295,7 +295,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.LastLine):
 			if currSection != nil {
 				if currSection.CurrRow()+1 < currSection.NumRows() {
-					cmds = append(cmds, currSection.FetchNextPageSectionRows()...)
+					// In a drilled-down projects section, NumRows counts the
+					// items list, so this must load more items — not another
+					// page of projects (see the Down handler above).
+					if projSection := drilledDownProjectSection(currSection); projSection != nil {
+						cmds = append(cmds, projSection.FetchNextItemsPage())
+					} else {
+						cmds = append(cmds, currSection.FetchNextPageSectionRows()...)
+					}
 				}
 				currSection.LastItem()
 				cmd = m.onViewedRowChanged()
@@ -541,7 +548,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// (refetching the items list). Kicking off a parent projects
 				// refetch here would clear the projects list and its result
 				// would be swallowed by the drill-down routing.
-				if projSection, ok := currSection.(*projectsection.Model); ok && projSection.IsDrilledDown() {
+				if drilledDownProjectSection(currSection) != nil {
 					break
 				}
 				if currSection != nil {

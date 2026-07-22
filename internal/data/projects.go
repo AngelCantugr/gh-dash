@@ -857,24 +857,6 @@ func TreeSortItems(items []ProjectItemData) []ProjectItemData {
 		}
 	}
 
-	// Compute depth for each item by walking parent chain.
-	depths := make([]int, len(items))
-	for i, item := range items {
-		depth := 0
-		cur := parentKey(item)
-		visited := make(map[string]bool)
-		for cur != "" && !visited[cur] {
-			visited[cur] = true
-			idx, ok := keyToIdx[cur]
-			if !ok {
-				break
-			}
-			depth++
-			cur = parentKey(items[idx])
-		}
-		depths[i] = depth
-	}
-
 	// Build children map: parent key → child indices (in original order).
 	children := make(map[string][]int, len(items))
 	var roots []int
@@ -891,34 +873,36 @@ func TreeSortItems(items []ProjectItemData) []ProjectItemData {
 		}
 	}
 
-	// DFS traversal to produce tree-ordered output.
+	// DFS traversal to produce tree-ordered output. Depth is derived from the
+	// traversal itself (parent's depth + 1), not from a separate ancestor-chain
+	// walk — walking parentKey links directly would let a cycle elsewhere in
+	// the data inflate the depth of an otherwise ordinary descendant.
 	result := make([]ProjectItemData, 0, len(items))
 	emitted := make([]bool, len(items))
-	var dfs func(idx int)
-	dfs = func(idx int) {
+	var dfs func(idx, depth int)
+	dfs = func(idx, depth int) {
 		if emitted[idx] {
 			return
 		}
 		emitted[idx] = true
 		item := items[idx]
-		item.Depth = depths[idx]
+		item.Depth = depth
 		result = append(result, item)
 		for _, childIdx := range children[itemKey(item)] {
-			dfs(childIdx)
+			dfs(childIdx, depth+1)
 		}
 	}
 	for _, idx := range roots {
-		dfs(idx)
+		dfs(idx, 0)
 	}
 
 	// Items whose parent chain forms a cycle (including self-parented items)
-	// are never classified as roots and never reached by the DFS. Emit them
-	// (and their subtrees) as roots so no row silently disappears from the
-	// view.
+	// are never classified as roots and never reached by the DFS above. Emit
+	// them (and their subtrees) as synthetic roots so no row silently
+	// disappears from the view.
 	for i := range items {
 		if !emitted[i] {
-			depths[i] = 0
-			dfs(i)
+			dfs(i, 0)
 		}
 	}
 
