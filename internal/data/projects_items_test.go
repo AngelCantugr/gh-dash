@@ -654,3 +654,92 @@ func TestFetchProjectItemsLoadMoreStichesMockData(t *testing.T) {
 	assert.Equal(t, "ITEM_PAGE2", final.Items[1].ID)
 	assert.False(t, final.PageInfo.HasNextPage)
 }
+
+// --------------------------------------------------------------------------
+// TreeSortItems
+// --------------------------------------------------------------------------
+
+func TestTreeSortItems_MultiRepoSameNumber(t *testing.T) {
+	// Repo A #5 is a real parent; repo B independently has its own #5.
+	// The child (parent = A#5) must nest under A#5, not B#5.
+	items := []ProjectItemData{
+		{ID: "b5", Type: ItemTypeIssue, Title: "B five", Repo: "org/repo-b", Number: 5},
+		{ID: "a5", Type: ItemTypeIssue, Title: "A five", Repo: "org/repo-a", Number: 5},
+		{ID: "child", Type: ItemTypeIssue, Title: "child of A#5", Repo: "org/repo-a", Number: 9, ParentNumber: 5, ParentRepo: "org/repo-a"},
+	}
+
+	sorted := TreeSortItems(items)
+
+	require.Len(t, sorted, 3)
+	ids := []string{sorted[0].ID, sorted[1].ID, sorted[2].ID}
+	require.Equal(t, []string{"b5", "a5", "child"}, ids, "child must immediately follow its real (repo-a) parent")
+	assert.Equal(t, 0, sorted[0].Depth)
+	assert.Equal(t, 0, sorted[1].Depth)
+	assert.Equal(t, 1, sorted[2].Depth)
+}
+
+func TestTreeSortItems_ParentRepoFallsBackToOwnRepo(t *testing.T) {
+	// ParentRepo unset (stale cache entry): assume the parent lives in the
+	// item's own repo.
+	items := []ProjectItemData{
+		{ID: "parent", Type: ItemTypeIssue, Repo: "org/repo-a", Number: 1},
+		{ID: "child", Type: ItemTypeIssue, Repo: "org/repo-a", Number: 2, ParentNumber: 1},
+	}
+
+	sorted := TreeSortItems(items)
+
+	require.Len(t, sorted, 2)
+	require.Equal(t, "parent", sorted[0].ID)
+	require.Equal(t, "child", sorted[1].ID)
+	assert.Equal(t, 1, sorted[1].Depth)
+}
+
+func TestTreeSortItems_CycleNotDropped(t *testing.T) {
+	// A→B→A cycle plus a self-parented item: none can be classified as a
+	// root, but every row must still be emitted exactly once.
+	items := []ProjectItemData{
+		{ID: "a", Type: ItemTypeIssue, Repo: "org/repo", Number: 1, ParentNumber: 2, ParentRepo: "org/repo"},
+		{ID: "b", Type: ItemTypeIssue, Repo: "org/repo", Number: 2, ParentNumber: 1, ParentRepo: "org/repo"},
+		{ID: "self", Type: ItemTypeIssue, Repo: "org/repo", Number: 3, ParentNumber: 3, ParentRepo: "org/repo"},
+		{ID: "root", Type: ItemTypeIssue, Repo: "org/repo", Number: 4},
+	}
+
+	sorted := TreeSortItems(items)
+
+	require.Len(t, sorted, len(items), "cyclic items must not be dropped")
+	seen := make(map[string]int)
+	for _, it := range sorted {
+		seen[it.ID]++
+	}
+	for _, id := range []string{"a", "b", "self", "root"} {
+		assert.Equal(t, 1, seen[id], "item %s must appear exactly once", id)
+	}
+}
+
+func TestTreeSortItems_CycleChildStillNested(t *testing.T) {
+	// A child of a cycle member is emitted with its parent's subtree, not
+	// orphaned at the end.
+	items := []ProjectItemData{
+		{ID: "a", Type: ItemTypeIssue, Repo: "org/repo", Number: 1, ParentNumber: 2, ParentRepo: "org/repo"},
+		{ID: "b", Type: ItemTypeIssue, Repo: "org/repo", Number: 2, ParentNumber: 1, ParentRepo: "org/repo"},
+		{ID: "leaf", Type: ItemTypeIssue, Repo: "org/repo", Number: 5, ParentNumber: 1, ParentRepo: "org/repo"},
+	}
+
+	sorted := TreeSortItems(items)
+
+	require.Len(t, sorted, 3)
+	idx := make(map[string]int)
+	byID := make(map[string]ProjectItemData)
+	for i, it := range sorted {
+		idx[it.ID] = i
+		byID[it.ID] = it
+	}
+	assert.Greater(t, idx["leaf"], idx["a"], "leaf must come after its parent a")
+
+	// Regression: depth must come from the DFS traversal (parent's emitted
+	// depth + 1), not from walking parentKey links directly — the latter
+	// walks through the whole a<->b cycle before "visited" stops it,
+	// inflating leaf's depth to 2 even though it renders one level under a.
+	assert.Equal(t, 0, byID["a"].Depth, "cycle member chosen as synthetic root must be depth 0")
+	assert.Equal(t, 1, byID["leaf"].Depth, "leaf is a direct child of a and must be depth 1, not inflated by the a<->b cycle")
+}

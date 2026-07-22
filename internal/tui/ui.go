@@ -268,7 +268,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				nextRow := currSection.NextRow()
 				if prevRow != nextRow && nextRow == currSection.NumRows()-1 &&
 					m.ctx.View != config.RepoView {
-					cmds = append(cmds, currSection.FetchNextPageSectionRows()...)
+					// In a drilled-down projects section, NumRows counts the
+					// items list, so auto-pagination must load more items —
+					// not another page of projects.
+					if projSection := drilledDownProjectSection(currSection); projSection != nil {
+						cmds = append(cmds, projSection.FetchNextItemsPage())
+					} else {
+						cmds = append(cmds, currSection.FetchNextPageSectionRows()...)
+					}
 				}
 				cmd = m.onViewedRowChanged()
 			}
@@ -288,7 +295,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.LastLine):
 			if currSection != nil {
 				if currSection.CurrRow()+1 < currSection.NumRows() {
-					cmds = append(cmds, currSection.FetchNextPageSectionRows()...)
+					// In a drilled-down projects section, NumRows counts the
+					// items list, so this must load more items — not another
+					// page of projects (see the Down handler above).
+					if projSection := drilledDownProjectSection(currSection); projSection != nil {
+						cmds = append(cmds, projSection.FetchNextItemsPage())
+					} else {
+						cmds = append(cmds, currSection.FetchNextPageSectionRows()...)
+					}
 				}
 				currSection.LastItem()
 				cmd = m.onViewedRowChanged()
@@ -530,6 +544,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.switchSelectedView())
 
 			case key.Matches(msg, keys.ProjectKeys.Refresh):
+				// While drilled down, the section handles Refresh itself
+				// (refetching the items list). Kicking off a parent projects
+				// refetch here would clear the projects list and its result
+				// would be swallowed by the drill-down routing.
+				if drilledDownProjectSection(currSection) != nil {
+					break
+				}
 				if currSection != nil {
 					if err := projectsection.InvalidateCaches(m.ctx.ProjectsCache); err != nil {
 						log.Error("refresh: invalidate projects caches", "err", err)
@@ -1372,6 +1393,11 @@ func (m *Model) syncSidebar() tea.Cmd {
 		// Show prompt to view notification (don't auto-fetch)
 		// User must press Enter to view content and mark as read
 		m.sidebar.SetContent(m.renderNotificationPrompt(row))
+	default:
+		// Unknown row types (e.g. the draft/redacted browser proxy returned
+		// by the projects drill-down) must not leave the previous row's
+		// content on screen.
+		m.sidebar.SetContent("")
 	}
 
 	return cmd

@@ -14,7 +14,6 @@ import (
 
 	"github.com/dlvhdr/gh-dash/v4/internal/config"
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
-	"github.com/dlvhdr/gh-dash/v4/internal/persistcache"
 )
 
 // notifyState is persisted to disk between polls so counts survive restarts.
@@ -39,12 +38,6 @@ SIGINT / SIGTERM.`,
 			return fmt.Errorf("notify: load config: %w", err)
 		}
 
-		cache, err := persistcache.New()
-		if err != nil {
-			// Non-fatal: operate without cache.
-			log.Warn("notify: cache unavailable", "err", err)
-		}
-
 		state := loadNotifyState(stateFile)
 
 		log.Info("gh-dash notify started",
@@ -54,7 +47,7 @@ SIGINT / SIGTERM.`,
 		)
 
 		for {
-			changed := pollSections(&cfg, cache, state)
+			changed := pollSections(&cfg, state)
 			if changed {
 				if err := saveNotifyState(stateFile, state); err != nil {
 					log.Warn("notify: save state", "err", err)
@@ -73,7 +66,10 @@ func init() {
 
 // pollSections fetches each PR section and fires a notification when the count grows.
 // Returns true if any count changed (so the state file can be saved).
-func pollSections(cfg *config.Config, cache *persistcache.Store, state *notifyState) bool {
+// The fetch deliberately bypasses the shared disk cache: a poller that reads a
+// 30-minute cache would only notice new PRs once per TTL, regardless of the
+// configured interval.
+func pollSections(cfg *config.Config, state *notifyState) bool {
 	changed := false
 	limit := cfg.Defaults.PrsLimit
 	if limit == 0 {
@@ -81,7 +77,7 @@ func pollSections(cfg *config.Config, cache *persistcache.Store, state *notifySt
 	}
 
 	for _, section := range cfg.PRSections {
-		res, err := data.FetchPullRequests(cache, section.Filters, limit, nil)
+		res, err := data.FetchPullRequests(nil, section.Filters, limit, nil)
 		if err != nil {
 			log.Warn("notify: fetch failed", "section", section.Title, "err", err)
 			continue

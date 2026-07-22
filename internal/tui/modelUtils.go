@@ -19,6 +19,7 @@ import (
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/common"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/notificationrow"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/projectsection"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/prrow"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/section"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/constants"
@@ -40,6 +41,19 @@ func (m *Model) getCurrRowData() data.RowData {
 		return nil
 	}
 	return section.GetCurrRow()
+}
+
+// drilledDownProjectSection returns s as a *projectsection.Model if it is one
+// and currently drilled into a project's items view, or nil otherwise. Call
+// sites that must route an action to the items list instead of the projects
+// list (auto-pagination, refresh) share this check instead of repeating the
+// type assertion.
+func drilledDownProjectSection(s section.Section) *projectsection.Model {
+	projSection, ok := s.(*projectsection.Model)
+	if !ok || !projSection.IsDrilledDown() {
+		return nil
+	}
+	return projSection
 }
 
 func (m *Model) getSectionAt(id int) section.Section {

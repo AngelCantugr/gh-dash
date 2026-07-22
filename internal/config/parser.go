@@ -405,7 +405,9 @@ func (d *Duration) parseDurationString(s string) error {
 }
 
 type ProjectFilters struct {
-	Closed        bool   `yaml:"closed"`
+	// Closed is tri-state: nil (unset) shows open and closed projects,
+	// false shows open only, true shows closed only.
+	Closed        *bool  `yaml:"closed"`
 	TitleContains string `yaml:"titleContains,omitempty"`
 }
 

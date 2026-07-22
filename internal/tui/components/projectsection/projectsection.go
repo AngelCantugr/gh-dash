@@ -86,18 +86,24 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 	var cmd tea.Cmd
 
 	// While drilled-down, route most messages to the items sub-model.
-	// Back and Refresh keys are intercepted here so the parent can act on them.
+	// Back and Refresh keys are intercepted here so the parent can act on
+	// them, and parent fetch results are still applied so the projects list
+	// isn't left empty/loading when the user navigates back.
 	if m.isDrilledDown && m.itemsView != nil {
-		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
 			switch {
-			case key.Matches(keyMsg, keys.ProjectKeys.Back):
+			case key.Matches(msg, keys.ProjectKeys.Back):
 				m.isDrilledDown = false
 				m.itemsView = nil
 				return m, nil
-			case key.Matches(keyMsg, keys.ProjectKeys.Refresh):
+			case key.Matches(msg, keys.ProjectKeys.Refresh):
 				// r inside drill-down refetches the items list, not the projects list.
-				return m, m.itemsView.FetchItems(false)
+				return m, m.itemsView.Refresh()
 			}
+		case SectionProjectsFetchedMsg:
+			m.handleProjectsFetched(msg)
+			return m, nil
 		}
 		var iCmd tea.Cmd
 		m.itemsView, iCmd = m.itemsView.Update(msg)
@@ -154,24 +160,7 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 		}
 
 	case SectionProjectsFetchedMsg:
-		if m.LastFetchTaskId == msg.TaskId {
-			if m.PageInfo != nil {
-				m.Projects = append(m.Projects, msg.Projects...)
-			} else {
-				m.Projects = msg.Projects
-			}
-			m.TotalCount = msg.TotalCount
-			m.PageInfo = &msg.PageInfo
-			m.SetIsLoading(false)
-			m.Table.SetRows(m.BuildRows())
-			m.Table.UpdateLastUpdated(time.Now())
-			m.UpdateTotalItemsCount(m.TotalCount)
-			// Restore cursor to the last persisted position on the first fetch.
-			if !m.cursorApplied && m.initialCursor > 0 {
-				m.Table.SetCurrItem(m.initialCursor)
-				m.cursorApplied = true
-			}
-		}
+		m.handleProjectsFetched(msg)
 
 	case projectitemsview.ProjectItemsFetchedMsg:
 		// Route to itemsView if present (may arrive after leaving drill-down — safe to ignore).
@@ -199,6 +188,31 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmd, searchCmd, promptCmd, tableCmd)
+}
+
+// handleProjectsFetched applies a fetched projects page to the section. It is
+// called from both the normal path and the drilled-down path so a parent
+// refetch that completes during drill-down is not dropped.
+func (m *Model) handleProjectsFetched(msg SectionProjectsFetchedMsg) {
+	if m.LastFetchTaskId != msg.TaskId {
+		return
+	}
+	if m.PageInfo != nil {
+		m.Projects = append(m.Projects, msg.Projects...)
+	} else {
+		m.Projects = msg.Projects
+	}
+	m.TotalCount = msg.TotalCount
+	m.PageInfo = &msg.PageInfo
+	m.SetIsLoading(false)
+	m.Table.SetRows(m.BuildRows())
+	m.Table.UpdateLastUpdated(time.Now())
+	m.UpdateTotalItemsCount(m.TotalCount)
+	// Restore cursor to the last persisted position on the first fetch.
+	if !m.cursorApplied && m.initialCursor > 0 {
+		m.Table.SetCurrItem(m.initialCursor)
+		m.cursorApplied = true
+	}
 }
 
 // View returns either the items drill-down view or the normal projects table.
@@ -248,6 +262,25 @@ func (m *Model) GetCurrRow() data.RowData {
 // IsDrilledDown reports whether the items drill-down is active.
 func (m *Model) IsDrilledDown() bool {
 	return m.isDrilledDown
+}
+
+// FetchNextItemsPage loads the next page of the drill-down items list.
+// Returns nil when not drilled down or there is no next page.
+func (m *Model) FetchNextItemsPage() tea.Cmd {
+	if m.isDrilledDown && m.itemsView != nil {
+		return m.itemsView.LoadMore()
+	}
+	return nil
+}
+
+// UpdateProgramContext propagates context changes (e.g. a terminal resize) to
+// the items drill-down view as well — the BaseModel only resizes the
+// section's own table.
+func (m *Model) UpdateProgramContext(ctx *context.ProgramContext) {
+	m.BaseModel.UpdateProgramContext(ctx)
+	if m.itemsView != nil {
+		m.itemsView.UpdateProgramContext(ctx)
+	}
 }
 
 // getProjectCurrRow is a helper that retrieves the current project row data
@@ -377,8 +410,8 @@ func (m *Model) FetchNextPageSectionRows() []tea.Cmd {
 			fetchLimit = *limit
 		}
 
-		// Convert config.ProjectFilters → data.ProjectFilters
-		// (config uses bool, data uses *bool)
+		// Convert config.ProjectFilters → data.ProjectFilters. Both sides
+		// are tri-state: nil Closed means "any state".
 		dataOwners := make([]data.OwnerRef, len(owners))
 		for i, o := range owners {
 			dataOwners[i] = data.OwnerRef{
@@ -386,9 +419,8 @@ func (m *Model) FetchNextPageSectionRows() []tea.Cmd {
 				Login: o.Login,
 			}
 		}
-		closedPtr := &filters.Closed
 		dataFilters := data.ProjectFilters{
-			Closed:        closedPtr,
+			Closed:        filters.Closed,
 			TitleContains: filters.TitleContains,
 		}
 
@@ -518,11 +550,14 @@ func FetchAllSections(
 			time.Now(),
 		)
 		// Preserve existing data across refresh so the user sees stale rows
-		// while the new fetch is in flight.
+		// while the new fetch is in flight. Drill-down state is carried too:
+		// an interval refresh must not yank the user out of the items view.
 		if i < len(oldSections) && oldSections[i] != nil {
 			if old, ok := oldSections[i].(*Model); ok {
 				sectionModel.Projects = old.Projects
 				sectionModel.LastFetchTaskId = old.LastFetchTaskId
+				sectionModel.isDrilledDown = old.isDrilledDown
+				sectionModel.itemsView = old.itemsView
 			}
 		}
 		sections = append(sections, &sectionModel)
