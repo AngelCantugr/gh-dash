@@ -246,6 +246,23 @@ func TestProjectsSections(t *testing.T) {
 		require.True(t, parsed.State.Enabled)
 	})
 
+	t.Run("Closed filter is tri-state", func(t *testing.T) {
+		parsed, err := ParseConfig(Location{
+			ConfigFlag:       path.Join(cwd, "testdata/projects/closed-tristate.yml"),
+			SkipGlobalConfig: true,
+		})
+		require.NoError(t, err)
+		require.Len(t, parsed.ProjectsSections, 3)
+
+		require.Nil(t, parsed.ProjectsSections[0].Filters.Closed, "unset closed must stay nil (any state)")
+
+		require.NotNil(t, parsed.ProjectsSections[1].Filters.Closed)
+		require.False(t, *parsed.ProjectsSections[1].Filters.Closed, "closed: false must mean open only")
+
+		require.NotNil(t, parsed.ProjectsSections[2].Filters.Closed)
+		require.True(t, *parsed.ProjectsSections[2].Filters.Closed, "closed: true must mean closed only")
+	})
+
 	t.Run("Unknown top-level key returns parse error", func(t *testing.T) {
 		_, err := ParseConfig(Location{
 			ConfigFlag:       path.Join(cwd, "testdata/projects/invalid-unknown-top-level-key.yml"),

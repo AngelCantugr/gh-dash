@@ -1,0 +1,14 @@
+projectsSections:
+  - title: "Any state"
+    owners:
+      - org:my-org
+  - title: "Open only"
+    owners:
+      - org:my-org
+    filters:
+      closed: false
+  - title: "Closed only"
+    owners:
+      - org:my-org
+    filters:
+      closed: true

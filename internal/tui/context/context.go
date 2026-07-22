@@ -81,6 +81,13 @@ func (ctx *ProgramContext) GetViewSectionsConfig() []config.SectionConfig {
 		for _, cfg := range ctx.Config.IssuesSections {
 			configs = append(configs, cfg.ToSectionConfig())
 		}
+	case config.ProjectsView:
+		// Projects view stores real sections starting at index 0 — there is
+		// no search section, so no search prefix entry here.
+		for _, cfg := range ctx.Config.ProjectsSections {
+			configs = append(configs, cfg.ToSectionConfig())
+		}
+		return configs
 	}
 
 	return append([]config.SectionConfig{{Title: ""}}, configs...)

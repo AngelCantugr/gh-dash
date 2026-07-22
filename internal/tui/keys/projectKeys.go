@@ -58,6 +58,7 @@ func ProjectFullHelp() []key.Binding {
 		ProjectKeys.LoadMore,
 		ProjectKeys.Back,
 		ProjectKeys.EditStatus,
+		ProjectKeys.SwitchView,
 	}
 }
 
@@ -98,6 +99,8 @@ func rebindProjectKeys(keys []config.Keybinding) error {
 			binding = &ProjectKeys.Back
 		case "editStatus":
 			binding = &ProjectKeys.EditStatus
+		case "switchView":
+			binding = &ProjectKeys.SwitchView
 		default:
 			return fmt.Errorf("unknown built-in project key: '%s'", projectKey.Builtin)
 		}

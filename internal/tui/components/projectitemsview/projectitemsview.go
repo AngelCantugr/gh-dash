@@ -303,6 +303,19 @@ func (m *Model) FetchItems(appendMode bool) tea.Cmd {
 	}
 }
 
+// Refresh invalidates this project's cached items and refetches the first
+// page from the network. A plain FetchItems(false) would serve the disk cache
+// within its TTL, making an explicit refresh a no-op.
+func (m *Model) Refresh() tea.Cmd {
+	if m.ctx != nil && m.ctx.ProjectsCache != nil {
+		cacheKey := "project-items/" + m.projectID
+		if err := m.ctx.ProjectsCache.Invalidate(cacheKey); err != nil {
+			log.Warn("projectitemsview: refresh cache invalidation", "key", cacheKey, "err", err)
+		}
+	}
+	return m.FetchItems(false)
+}
+
 // LoadMore fetches the next page of items if there is one.
 func (m *Model) LoadMore() tea.Cmd {
 	if m.pageInfo == nil || !m.pageInfo.HasNextPage {
@@ -426,6 +439,10 @@ func (m *Model) onStatusPicked(optionID string) tea.Cmd {
 	}
 
 	optIDCopy := optionID
+	// Copy for the closure: m.previousStatus is overwritten as soon as the
+	// picker opens for another item, and the closure runs on a goroutine —
+	// reading the field there is both a data race and a wrong-rollback bug.
+	prevStatus := m.previousStatus
 
 	// Register the task with the footer spinner.
 	var startCmd tea.Cmd
@@ -456,7 +473,7 @@ func (m *Model) onStatusPicked(optionID string) tea.Cmd {
 				Err:         err,
 				Msg: StatusUpdateErrMsg{
 					ItemID:         itemID,
-					PreviousStatus: m.previousStatus,
+					PreviousStatus: prevStatus,
 					Err:            err,
 				},
 			}
