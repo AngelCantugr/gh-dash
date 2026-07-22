@@ -255,6 +255,15 @@ func (s *Store) writeEntry(key string, data []byte, ttl time.Duration) error {
 func (s *Store) Invalidate(prefix string) error {
 	s.mu.Lock()
 	s.gens[prefix]++
+	// PutIfFresh gates on the generation of the key's *directory* prefix
+	// (keyPrefix). When invalidating a partial name like "dir/key", bump the
+	// directory generation too, or in-flight PutIfFresh("dir/key", …) calls
+	// would still pass the staleness check.
+	if !strings.HasSuffix(prefix, "/") {
+		if dirPrefix := keyPrefix(prefix); dirPrefix != prefix {
+			s.gens[dirPrefix]++
+		}
+	}
 	s.mu.Unlock()
 
 	dir := filepath.Join(s.root, filepath.FromSlash(prefix))

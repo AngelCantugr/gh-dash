@@ -458,6 +458,7 @@ func (e EnrichedPullRequestData) ToPullRequestData() PullRequestData {
 		Repository:        e.Repository,
 		Assignees:         e.Assignees,
 		IsDraft:           e.IsDraft,
+		IsInMergeQueue:    e.IsInMergeQueue,
 		Labels:            e.Labels,
 		Files:             e.Files,
 		// Note: Comments, ReviewThreads, Reviews, ReviewRequests, Commits

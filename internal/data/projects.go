@@ -413,7 +413,10 @@ type gqlFieldValueNode struct {
 	AsParentIssue struct {
 		Field gqlFieldRef
 		Issue struct {
-			Number int
+			Number     int
+			Repository struct {
+				NameWithOwner string
+			}
 		}
 	} `graphql:"... on ProjectV2ItemFieldParentIssueValue"`
 }
@@ -774,7 +777,7 @@ func parseItemType(s string) ItemType {
 func parseProjectItem(node gqlItemNode) ProjectItemData {
 	itemType := parseItemType(node.ItemType)
 
-	var title, repo, url string
+	var title, repo, url, parentRepo string
 	var number, parentNumber int
 	switch itemType {
 	case ItemTypeIssue:
@@ -802,6 +805,7 @@ func parseProjectItem(node gqlItemNode) ProjectItemData {
 		// Extract parent issue number from the built-in Parent issue field.
 		if fvNode.TypeName == "ProjectV2ItemFieldParentIssueValue" {
 			parentNumber = fvNode.AsParentIssue.Issue.Number
+			parentRepo = fvNode.AsParentIssue.Issue.Repository.NameWithOwner
 		}
 	}
 
@@ -813,6 +817,7 @@ func parseProjectItem(node gqlItemNode) ProjectItemData {
 		URL:          url,
 		Number:       number,
 		ParentNumber: parentNumber,
+		ParentRepo:   parentRepo,
 		Fields:       fields,
 		UpdatedAt:    node.UpdatedAt,
 	}
@@ -823,11 +828,32 @@ func parseProjectItem(node gqlItemNode) ProjectItemData {
 // this project's item set. Items whose parent is not present in the set are
 // treated as roots (depth 0).
 func TreeSortItems(items []ProjectItemData) []ProjectItemData {
-	// Build lookup: issue number → item index.
-	numToIdx := make(map[int]int, len(items))
+	// Issue numbers are only unique per repository, so the tree is keyed by
+	// "owner/repo#number". An item whose ParentRepo is unset (stale cache
+	// entry, or a parent the viewer cannot see) is assumed to share its own
+	// repo — the common single-repo case.
+	itemKey := func(item ProjectItemData) string {
+		if item.Number == 0 {
+			return ""
+		}
+		return fmt.Sprintf("%s#%d", item.Repo, item.Number)
+	}
+	parentKey := func(item ProjectItemData) string {
+		if item.ParentNumber == 0 {
+			return ""
+		}
+		repo := item.ParentRepo
+		if repo == "" {
+			repo = item.Repo
+		}
+		return fmt.Sprintf("%s#%d", repo, item.ParentNumber)
+	}
+
+	// Build lookup: item key → item index.
+	keyToIdx := make(map[string]int, len(items))
 	for i, item := range items {
-		if item.Number != 0 {
-			numToIdx[item.Number] = i
+		if k := itemKey(item); k != "" {
+			keyToIdx[k] = i
 		}
 	}
 
@@ -835,29 +861,30 @@ func TreeSortItems(items []ProjectItemData) []ProjectItemData {
 	depths := make([]int, len(items))
 	for i, item := range items {
 		depth := 0
-		cur := item.ParentNumber
-		visited := make(map[int]bool)
-		for cur != 0 && !visited[cur] {
+		cur := parentKey(item)
+		visited := make(map[string]bool)
+		for cur != "" && !visited[cur] {
 			visited[cur] = true
-			if _, ok := numToIdx[cur]; !ok {
+			idx, ok := keyToIdx[cur]
+			if !ok {
 				break
 			}
 			depth++
-			cur = items[numToIdx[cur]].ParentNumber
+			cur = parentKey(items[idx])
 		}
 		depths[i] = depth
 	}
 
-	// Build children map: parent number → child indices (in original order).
-	children := make(map[int][]int, len(items))
+	// Build children map: parent key → child indices (in original order).
+	children := make(map[string][]int, len(items))
 	var roots []int
 	for i, item := range items {
-		parent := item.ParentNumber
-		if parent == 0 {
+		parent := parentKey(item)
+		if parent == "" {
 			roots = append(roots, i)
 			continue
 		}
-		if _, ok := numToIdx[parent]; ok {
+		if _, ok := keyToIdx[parent]; ok {
 			children[parent] = append(children[parent], i)
 		} else {
 			roots = append(roots, i)
@@ -866,17 +893,33 @@ func TreeSortItems(items []ProjectItemData) []ProjectItemData {
 
 	// DFS traversal to produce tree-ordered output.
 	result := make([]ProjectItemData, 0, len(items))
+	emitted := make([]bool, len(items))
 	var dfs func(idx int)
 	dfs = func(idx int) {
+		if emitted[idx] {
+			return
+		}
+		emitted[idx] = true
 		item := items[idx]
 		item.Depth = depths[idx]
 		result = append(result, item)
-		for _, childIdx := range children[item.Number] {
+		for _, childIdx := range children[itemKey(item)] {
 			dfs(childIdx)
 		}
 	}
 	for _, idx := range roots {
 		dfs(idx)
+	}
+
+	// Items whose parent chain forms a cycle (including self-parented items)
+	// are never classified as roots and never reached by the DFS. Emit them
+	// (and their subtrees) as roots so no row silently disappears from the
+	// view.
+	for i := range items {
+		if !emitted[i] {
+			depths[i] = 0
+			dfs(i)
+		}
 	}
 
 	return result

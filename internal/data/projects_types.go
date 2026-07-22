@@ -241,16 +241,19 @@ func unmarshalFieldValue(env fieldValueEnvelope) (FieldValue, error) {
 
 // ProjectItemData holds the data for a single project item.
 type ProjectItemData struct {
-	ID           string      `json:"id"`
-	Type         ItemType    `json:"type"`
-	Title        string      `json:"title"`
-	Repo         string      `json:"repo"`
-	URL          string      `json:"url"`
-	Number       int         `json:"number,omitempty"`
-	ParentNumber int         `json:"parentNumber,omitempty"`
-	Depth        int         `json:"depth,omitempty"`
-	Fields       FieldValues `json:"fields,omitempty"`
-	UpdatedAt    time.Time   `json:"updatedAt"`
+	ID           string   `json:"id"`
+	Type         ItemType `json:"type"`
+	Title        string   `json:"title"`
+	Repo         string   `json:"repo"`
+	URL          string   `json:"url"`
+	Number       int      `json:"number,omitempty"`
+	ParentNumber int      `json:"parentNumber,omitempty"`
+	// ParentRepo qualifies ParentNumber (issue numbers are only unique
+	// per-repo). Empty means "assume same repo as the item".
+	ParentRepo string      `json:"parentRepo,omitempty"`
+	Depth      int         `json:"depth,omitempty"`
+	Fields     FieldValues `json:"fields,omitempty"`
+	UpdatedAt  time.Time   `json:"updatedAt"`
 }
 
 // RowData interface implementation so ProjectItemData can flow through the

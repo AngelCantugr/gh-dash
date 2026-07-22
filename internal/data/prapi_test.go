@@ -156,3 +156,21 @@ func TestExtractQueuedFilter(t *testing.T) {
 		})
 	}
 }
+
+// TestToPullRequestData_PreservesIsInMergeQueue guards the enriched→primary
+// conversion: a queued PR opened from the notifications view must still render
+// as queued, not open.
+func TestToPullRequestData_PreservesIsInMergeQueue(t *testing.T) {
+	enriched := EnrichedPullRequestData{
+		Number:         42,
+		Title:          "queued PR",
+		State:          "OPEN",
+		IsInMergeQueue: true,
+	}
+
+	primary := enriched.ToPullRequestData()
+
+	require.True(t, primary.IsInMergeQueue, "IsInMergeQueue must survive ToPullRequestData")
+	require.Equal(t, 42, primary.Number)
+	require.Equal(t, "OPEN", primary.State)
+}

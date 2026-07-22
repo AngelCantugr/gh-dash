@@ -223,6 +223,31 @@ func TestPutIfFresh_StaleGenerationRejected(t *testing.T) {
 	require.False(t, hit, "stale PutIfFresh must not write the cache entry")
 }
 
+// TestPutIfFresh_StaleAfterPartialKeyInvalidate verifies that invalidating a
+// single key ("dir/key", no trailing slash) also advances the *directory*
+// generation that PutIfFresh checks. Regression test: UpdateItemStatus
+// invalidates "project-items/<projectID>" while in-flight load-more fetches
+// call PutIfFresh gated on Generation("project-items/") — without the
+// directory bump the stale write would succeed and resurrect pre-mutation
+// data.
+func TestPutIfFresh_StaleAfterPartialKeyInvalidate(t *testing.T) {
+	s := newTestStore(t)
+
+	// Simulate an in-flight fetch capturing the directory generation.
+	capturedGen := s.Generation("project-items/")
+
+	// A mutation invalidates just this project's entry (partial-name form).
+	require.NoError(t, s.Invalidate("project-items/PVT_abc"))
+
+	// The in-flight fetch completes; its write must be rejected as stale.
+	err := s.PutIfFresh("project-items/PVT_abc", []byte(`"stale"`), time.Hour, capturedGen)
+	require.ErrorIs(t, err, ErrStaleGeneration)
+
+	_, hit, getErr := s.Get("project-items/PVT_abc")
+	require.NoError(t, getErr)
+	require.False(t, hit, "stale PutIfFresh must not write the cache entry")
+}
+
 // TestPutIfFresh_CurrentGenerationAccepted verifies that PutIfFresh succeeds
 // when the generation has not advanced.
 func TestPutIfFresh_CurrentGenerationAccepted(t *testing.T) {
