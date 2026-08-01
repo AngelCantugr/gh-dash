@@ -4,22 +4,48 @@ import (
 	"charm.land/glamour/v2"
 	"charm.land/glamour/v2/ansi"
 	"charm.land/glamour/v2/styles"
+	log "charm.land/log/v2"
+
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/context"
 )
 
-var markdownStyle *ansi.StyleConfig
+var (
+	markdownStyle       *ansi.StyleConfig
+	markdownStyleSource string
+)
 
-func InitializeMarkdownStyle(hasDarkBackground bool) {
-	if markdownStyle != nil {
+func InitializeMarkdownStyle(ctx *context.ProgramContext) {
+	if markdownStyle != nil && markdownStyleSource == "bubbletea" {
+		log.Debugf("InitializeMarkdownStyle: keeping existing bubbletea style")
 		return
 	}
+
+	hasDarkBackground := true
+	backgroundSource := "default"
+	if ctx != nil {
+		hasDarkBackground = ctx.HasDarkBackground
+		backgroundSource = ctx.BackgroundSource
+	}
+
 	if hasDarkBackground {
 		markdownStyle = &CustomDarkStyleConfig
 	} else {
 		markdownStyle = &styles.LightStyleConfig
 	}
+	markdownStyleSource = backgroundSource
+
+	log.Debugf(
+		"InitializeMarkdownStyle: assigned ctx.hasDarkBackground=%t, markdownStyleSource=%q",
+		hasDarkBackground,
+		markdownStyleSource,
+	)
 }
 
-func GetMarkdownRenderer(width int) glamour.TermRenderer {
+func GetMarkdownRenderer(width int, ctx *context.ProgramContext) glamour.TermRenderer {
+	if markdownStyle == nil {
+		InitializeMarkdownStyle(ctx)
+	}
+
 	markdownRenderer, err := glamour.NewTermRenderer(
 		glamour.WithStyles(*markdownStyle),
 		glamour.WithWordWrap(width),
@@ -31,7 +57,11 @@ func GetMarkdownRenderer(width int) glamour.TermRenderer {
 			return *fallback
 		}
 		// If even fallback fails, panic with helpful message
-		panic("failed to create markdown renderer: " + err.Error())
+		msg := "unknown error"
+		if err != nil {
+			msg = err.Error()
+		}
+		panic("failed to create markdown renderer: " + msg)
 	}
 
 	return *markdownRenderer

@@ -5,17 +5,28 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
-	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/cmp"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/fuzzyselect"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/context"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/keys"
 )
 
-// statuspicker is a selection-mode wrapper over cmp.Model.
+// selectKey confirms the highlighted option. Unlike keys.CmpKeys.SelectKey
+// (which reserves enter/tab for text input in the mentions/labels
+// autocomplete), the status picker has no text input of its own, so enter
+// and tab are free to use as confirm shortcuts alongside ctrl+y.
+var selectKey = key.NewBinding(
+	key.WithKeys("tab", "enter", "ctrl+y"),
+	key.WithHelp("tab/enter/ctrl+y", "select"),
+)
+
+// statuspicker is a selection-mode wrapper over fuzzyselect.Model.
 // Unlike cmpcontroller (which drives text input + filter), statuspicker:
 //   - Displays a static list of Status options
 //   - Arrow keys navigate; Enter confirms; Esc cancels
 //   - No text input
 type statuspicker struct {
-	cmpModel cmp.Model
+	cmpModel fuzzyselect.Model
+	source   *fuzzyselect.ListSource
 	options  []data.StatusOption
 	open     bool
 	onPick   func(optionID string) tea.Cmd
@@ -29,10 +40,12 @@ func newStatusPicker(
 	onPick func(optionID string) tea.Cmd,
 	onCancel func() tea.Cmd,
 ) statuspicker {
-	m := cmp.NewModel(ctx)
+	src := &fuzzyselect.ListSource{}
+	m := fuzzyselect.NewModel(ctx, src)
 	m.SetWidth(32)
 	return statuspicker{
 		cmpModel: m,
+		source:   src,
 		onPick:   onPick,
 		onCancel: onCancel,
 	}
@@ -45,13 +58,14 @@ func (s *statuspicker) Open(options []data.StatusOption) {
 		return
 	}
 	s.options = options
-	suggestions := make([]cmp.Suggestion, len(options))
+	suggestions := make([]fuzzyselect.Suggestion, len(options))
 	for i, opt := range options {
-		suggestions[i] = cmp.Suggestion{Value: opt.Name, Detail: opt.Color}
+		suggestions[i] = fuzzyselect.Suggestion{Value: opt.Name, Detail: opt.Color}
 	}
-	s.cmpModel.SetSuggestions(suggestions)
-	// Show("", nil) — empty string returns all suggestions unfiltered.
-	s.cmpModel.Show("", nil)
+	s.source.Options = suggestions
+	// Empty content returns all suggestions unfiltered.
+	s.cmpModel.Filter("", fuzzyselect.Context{}, nil)
+	s.cmpModel.Show()
 	s.open = true
 }
 
@@ -92,15 +106,15 @@ func (s statuspicker) Update(msg tea.Msg) (statuspicker, tea.Cmd) {
 	}
 
 	switch {
-	case key.Matches(keyMsg, cmp.NextKey):
+	case key.Matches(keyMsg, keys.CmpKeys.NextKey):
 		s.cmpModel.Next()
 		return s, nil
 
-	case key.Matches(keyMsg, cmp.PrevKey):
+	case key.Matches(keyMsg, keys.CmpKeys.PrevKey):
 		s.cmpModel.Prev()
 		return s, nil
 
-	case key.Matches(keyMsg, cmp.SelectKey):
+	case key.Matches(keyMsg, selectKey):
 		optID := s.SelectedOptionID()
 		s.Close()
 		if s.onPick != nil && optID != "" {

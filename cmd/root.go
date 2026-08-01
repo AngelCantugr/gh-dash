@@ -11,15 +11,18 @@ import (
 	"runtime"
 	"runtime/debug"
 	"runtime/pprof"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"charm.land/log/v2"
 	"github.com/charmbracelet/fang"
+	"github.com/cli/go-gh/v2/pkg/repository"
 	zone "github.com/lrstanley/bubblezone/v2"
 	"github.com/spf13/cobra"
 
+	gitm "github.com/aymanbagabas/git-module"
 	"github.com/dlvhdr/gh-dash/v4/internal/config"
 	"github.com/dlvhdr/gh-dash/v4/internal/git"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui"
@@ -41,9 +44,16 @@ var (
 
 	rootCmd = &cobra.Command{
 		Use: "gh dash",
-		Long: lipgloss.JoinVertical(lipgloss.Left, logo.Render(),
+		Long: lipgloss.JoinVertical(
+			lipgloss.Left,
+			logo.Render(),
 			"A rich terminal UI for GitHub that doesn't break your flow.",
-			"Visit https://gh-dash.dev for the docs."),
+			"",
+			lipgloss.NewStyle().
+				Faint(true).
+				Italic(true).
+				Render("Visit https://gh-dash.dev for the docs."),
+		),
 		Short:   "A rich terminal UI for GitHub that doesn't break your flow.",
 		Version: "",
 		Example: `
@@ -66,9 +76,23 @@ gh dash -v
 )
 
 func Execute() {
+	themeFunc := fang.WithColorSchemeFunc(func(
+		ld lipgloss.LightDarkFunc,
+	) fang.ColorScheme {
+		c := ld(lipgloss.Color("#00196F"), lipgloss.Color("#02F9FB"))
+		def := fang.DefaultColorScheme(ld)
+		def.DimmedArgument = ld(lipgloss.Black, lipgloss.White)
+		def.Codeblock = lipgloss.Color("#1E1E2C")
+		def.Title = c
+		def.Flag = lipgloss.Color("#42A0FA")
+		def.Command = c
+		def.Program = c
+		return def
+	})
 	if err := fang.Execute(
 		context.Background(),
 		rootCmd,
+		themeFunc,
 		fang.WithVersion(rootCmd.Version),
 		fang.WithoutCompletions(),
 		fang.WithoutManpage(),
@@ -88,34 +112,6 @@ func setDebugLogLevel() {
 	case "error":
 		log.SetLevel(log.ErrorLevel)
 	}
-}
-
-func createModel(location config.Location, debug bool) (tui.Model, *os.File) {
-	var loggerFile *os.File
-
-	if debug {
-		var fileErr error
-		loggerFile, fileErr = os.OpenFile("debug.log",
-			os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o666)
-		if fileErr == nil {
-			log.SetOutput(loggerFile)
-			log.SetTimeFormat(time.Kitchen)
-			log.SetReportCaller(true)
-			setDebugLogLevel()
-			log.Info("Logging to debug.log")
-			if location.RepoPath != "" {
-				log.Info("Running in repo", "repo", location.RepoPath)
-			}
-		} else {
-			loggerFile, _ = tea.LogToFile("debug.log", "debug")
-			slog.Print("Failed setting up logging", fileErr)
-		}
-	} else {
-		log.SetOutput(os.Stderr)
-		log.SetLevel(log.FatalLevel)
-	}
-
-	return tui.NewModel(location), loggerFile
 }
 
 func buildVersion(version, commit, date, builtBy string) string {
@@ -161,7 +157,14 @@ func init() {
 	}
 
 	rootCmd.Version = buildVersion(Version, Commit, Date, BuiltBy)
-	rootCmd.SetVersionTemplate(`gh-dash {{printf "version %s\n" .Version}}`)
+	rootCmd.SetVersionTemplate(
+		lipgloss.JoinVertical(
+			lipgloss.Left,
+			"",
+			logo.Render(),
+			`gh-dash {{printf "version %s\n" .Version}}`,
+		),
+	)
 
 	rootCmd.Flags().Bool(
 		"debug",
@@ -183,29 +186,63 @@ func init() {
 	)
 
 	rootCmd.Run = func(_ *cobra.Command, args []string) {
-		var repo string
-		repos := config.IsFeatureEnabled(config.FF_REPO_VIEW)
-		if repos && len(args) > 0 {
-			repo = args[0]
+		debug, _ := rootCmd.Flags().GetBool("debug")
+		var loggerFile *os.File
+		if debug {
+			var fileErr error
+			loggerFile, fileErr = os.OpenFile("debug.log",
+				os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o666)
+			if fileErr == nil {
+				log.SetOutput(loggerFile)
+				log.SetTimeFormat(time.Kitchen)
+				log.SetReportCaller(true)
+				setDebugLogLevel()
+				log.Info("Logging to debug.log")
+			} else {
+				loggerFile, _ = tea.LogToFile("debug.log", "debug")
+				slog.Print("Failed setting up logging", fileErr)
+			}
+		} else {
+			log.SetOutput(os.Stderr)
+			log.SetLevel(log.FatalLevel)
+		}
+		if loggerFile != nil {
+			defer loggerFile.Close()
 		}
 
-		if repo == "" {
-			r, err := git.GetRepoInPwd()
-			if err == nil && r != nil {
-				repo = r.Path()
-			}
-		}
-		debug, err := rootCmd.Flags().GetBool("debug")
+		var gitRepoPath string
+		gitRepo, ghRepo, err := getCurrentGitAndGitHubRepos()
 		if err != nil {
-			log.Fatal("Cannot parse debug flag", err)
+			log.Error("error while determining git and github repos", "err", err)
+		}
+
+		if gitRepo != nil {
+			log.Info("found git repo at path", "path", gitRepo.Path())
+			gitRepoPath = gitRepo.Path()
+		} else {
+			log.Warn("did not find git repo at current path")
+		}
+
+		if ghRepo != (repository.Repository{}) {
+			log.Info(
+				"found github repo at current path",
+				"host",
+				ghRepo.Host,
+				"owner",
+				ghRepo.Owner,
+				"name",
+				ghRepo.Name,
+			)
+		} else {
+			log.Warn("did not find github repo at current path")
 		}
 
 		zone.NewGlobal()
 
-		model, logger := createModel(config.Location{RepoPath: repo, ConfigFlag: cfgFlag}, debug)
-		if logger != nil {
-			defer logger.Close()
-		}
+		model := tui.NewModel(
+			config.Location{RepoPath: gitRepoPath, ConfigFlag: cfgFlag},
+			tui.Repositories{GitRepo: gitRepo, GHRepo: &ghRepo},
+		)
 
 		cpuprofile, err := rootCmd.Flags().GetString("cpuprofile")
 		if err != nil {
@@ -222,7 +259,39 @@ func init() {
 
 		p := tea.NewProgram(model)
 		if _, err := p.Run(); err != nil {
-			log.Fatal("Failed starting the TUI", err)
+			fmt.Printf("%+v\n", err)
+			log.Fatal("fatal error during run", "err", err)
 		}
 	}
+}
+
+func getCurrentGitAndGitHubRepos() (*gitm.Repository, repository.Repository, error) {
+	_, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var gitRepo *gitm.Repository
+	var ghRepo repository.Repository
+	var gitErr, ghErr error
+	var wg sync.WaitGroup
+
+	wg.Go(func() {
+		gitRepo, gitErr = git.GetRepoInPwd()
+		if gitErr != nil {
+			cancel() // Abort the context, so the other function can abort early
+		}
+	})
+
+	wg.Go(func() {
+		ghRepo, ghErr = repository.Current()
+		if ghErr != nil {
+			cancel() // Abort the context, so the other function can abort early
+		}
+	})
+
+	wg.Wait()
+
+	if gitErr == context.Canceled || gitErr == nil {
+		return gitRepo, ghRepo, ghErr
+	}
+	return gitRepo, ghRepo, gitErr
 }

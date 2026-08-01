@@ -5,6 +5,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	gitm "github.com/aymanbagabas/git-module"
+	"github.com/cli/go-gh/v2/pkg/repository"
 	"github.com/dlvhdr/gh-dash/v4/internal/config"
 	"github.com/dlvhdr/gh-dash/v4/internal/persistcache"
 	"github.com/dlvhdr/gh-dash/v4/internal/state"
@@ -31,6 +33,8 @@ type Task struct {
 }
 
 type ProgramContext struct {
+	GHRepo               *repository.Repository
+	GitRepo              *gitm.Repository
 	RepoPath             string
 	RepoUrl              string
 	User                 string
@@ -42,6 +46,8 @@ type ProgramContext struct {
 	DynamicPreviewHeight int    // calculated preview height for bottom mode
 	PreviewPosition      string // resolved "right" or "bottom"
 	SidebarOpen          bool
+	HasDarkBackground    bool
+	BackgroundSource     string
 	Config               *config.Config
 	ConfigFlag           string
 	Version              string
@@ -56,6 +62,10 @@ type ProgramContext struct {
 	// ProjectsCache caches raw FetchProjects responses to disk.
 	// Nil if the cache could not be initialised — callers must guard with nil checks.
 	ProjectsCache *persistcache.Store
+}
+
+func (ctx *ProgramContext) HasGHRepo() bool {
+	return ctx.GHRepo != nil && *ctx.GHRepo != (repository.Repository{})
 }
 
 func (ctx *ProgramContext) GetViewSectionsConfig() []config.SectionConfig {
@@ -91,4 +101,18 @@ func (ctx *ProgramContext) GetViewSectionsConfig() []config.SectionConfig {
 	}
 
 	return append([]config.SectionConfig{{Title: ""}}, configs...)
+}
+
+func (ctx *ProgramContext) PreviewCursorPosition() tea.Position {
+	if ctx.PreviewPosition == "right" {
+		return tea.Position{
+			X: ctx.MainContentWidth,
+			Y: ctx.Styles.Pager.Height,
+		}
+	}
+
+	return tea.Position{
+		X: 0,
+		Y: ctx.MainContentHeight,
+	}
 }

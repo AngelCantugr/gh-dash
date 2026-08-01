@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -68,13 +69,12 @@ type EnrichedPullRequestData struct {
 	ReviewRequests     ReviewRequests             `graphql:"reviewRequests(last: 100)"`
 	Reviews            Reviews                    `graphql:"reviews(last: 100)"`
 	SuggestedReviewers []SuggestedReviewer
-	Files              ChangedFiles `graphql:"files(first: 5)"`
+	Files              ChangedFiles `graphql:"files(first: 20)"`
 }
 
 type PullRequestData struct {
 	Number int
 	Title  string
-	Body   string
 	Author struct {
 		Login string
 	}
@@ -96,17 +96,26 @@ type PullRequestData struct {
 		Name string
 	}
 	Repository       Repository
-	Assignees        Assignees      `graphql:"assignees(first: 3)"`
-	Comments         Comments       `graphql:"comments"`
-	ReviewThreads    ReviewThreads  `graphql:"reviewThreads"`
-	Reviews          Reviews        `graphql:"reviews(last: 3)"`
-	ReviewRequests   ReviewRequests `graphql:"reviewRequests(last: 5)"`
-	Files            ChangedFiles   `graphql:"files(first: 5)"`
+	Assignees        Assignees            `graphql:"assignees(first: 3)"`
+	Comments         Comments             `graphql:"comments"`
+	ReviewThreads    ReviewThreads        `graphql:"reviewThreads"`
+	Reviews          ReviewsNumber        `graphql:"reviews"`
+	ReviewRequests   ReviewRequestsNumber `graphql:"reviewRequests"`
 	IsDraft          bool
 	IsInMergeQueue   bool
-	Commits          Commits          `graphql:"commits(last: 1)"`
+	Commits          LastCommitStatus `graphql:"commits(last: 1)"`
 	Labels           PRLabels         `graphql:"labels(first: 6)"`
 	MergeStateStatus MergeStateStatus `graphql:"mergeStateStatus"`
+}
+
+type LastCommitStatus struct {
+	Nodes []struct {
+		Commit struct {
+			StatusCheckRollup struct {
+				State graphql.String
+			}
+		}
+	}
 }
 
 type CheckRun struct {
@@ -284,6 +293,10 @@ type Review struct {
 	UpdatedAt time.Time
 }
 
+type ReviewsNumber struct {
+	TotalCount int
+}
+
 type Reviews struct {
 	TotalCount int
 	Nodes      []Review
@@ -338,6 +351,10 @@ type ReviewRequestNode struct {
 		Bot       RequestedReviewerBot       `graphql:"... on Bot"`
 		Mannequin RequestedReviewerMannequin `graphql:"... on Mannequin"`
 	} `graphql:"requestedReviewer"`
+}
+
+type ReviewRequestsNumber struct {
+	TotalCount int
 }
 
 type ReviewRequests struct {
@@ -440,7 +457,6 @@ func (e EnrichedPullRequestData) ToPullRequestData() PullRequestData {
 	return PullRequestData{
 		Number:            e.Number,
 		Title:             e.Title,
-		Body:              e.Body,
 		Author:            e.Author,
 		AuthorAssociation: e.AuthorAssociation,
 		UpdatedAt:         e.UpdatedAt,
@@ -460,7 +476,6 @@ func (e EnrichedPullRequestData) ToPullRequestData() PullRequestData {
 		IsDraft:           e.IsDraft,
 		IsInMergeQueue:    e.IsInMergeQueue,
 		Labels:            e.Labels,
-		Files:             e.Files,
 		// Note: Comments, ReviewThreads, Reviews, ReviewRequests, Commits
 		// have different types in EnrichedPullRequestData vs PullRequestData
 		// We leave them as zero values since the enriched data will be used instead
@@ -516,7 +531,15 @@ func FetchPullRequests(cache *persistcache.Store, query string, limit int, pageI
 				gh.ClientOptions{Host: "localhost:3000", AuthToken: "fake-token"},
 			)
 		} else {
-			client, err = gh.DefaultGraphQLClient()
+			level := os.Getenv("LOG_LEVEL")
+			opts := gh.ClientOptions{}
+			if level == "debug" {
+				logger := NewHTTPLogger(0)
+				opts.Log = &logger
+				opts.LogVerboseHTTP = true
+				opts.LogColorize = true
+			}
+			client, err = gh.NewGraphQLClient(opts)
 		}
 	}
 
