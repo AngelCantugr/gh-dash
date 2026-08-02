@@ -24,7 +24,7 @@ import (
 //  1. get default config file or create it if it's missing
 //     1.1. try GH_DASH_CONFIG
 //     1.2. then check if we're in a git repo
-//     1.2.1. try both `.yml` and `.yaml`
+//     1.2.1. try both `.gh-dash.yml` and `.gh-dash.yaml`
 //     1.3. try to look under `XDG_CONFIG_HOME`
 //     1.4. if not, try with `os.UserHomeDir()`
 //     1.5. if still doesn't exist, create with defaults
@@ -128,6 +128,24 @@ func TestParser(t *testing.T) {
 		assert.Empty(t, cmp.Diff(expected, actual, keybindSorter))
 	})
 
+	t.Run("Should accept notifications as the default view", func(t *testing.T) {
+		dir, err := os.MkdirTemp("", "config")
+		testutils.AssertNoError(t, err)
+		defer os.RemoveAll(dir)
+
+		configPath := path.Join(dir, "config.yml")
+		err = os.WriteFile(configPath, []byte("defaults:\n  view: notifications\n"), 0o600)
+		testutils.AssertNoError(t, err)
+
+		parsed, err := ParseConfig(Location{
+			ConfigFlag:       configPath,
+			SkipGlobalConfig: true,
+		})
+
+		testutils.AssertNoError(t, err)
+		require.Equal(t, NotificationsView, parsed.Defaults.View)
+	})
+
 	t.Run("Should merge global config with passed config", func(t *testing.T) {
 		clearEnv := setXDGConfigHomeEnvVar(t, "testdata")
 		defer clearEnv()
@@ -141,6 +159,32 @@ func TestParser(t *testing.T) {
 
 		expected := loadExpected(t, "./testdata/merged-config.golden.yml")
 		assert.Empty(t, cmp.Diff(expected, actual, keybindSorter))
+	})
+
+	t.Run("Should merge configs referenced by the include directive", func(t *testing.T) {
+		cwd := Testwd(t)
+		parsed, err := ParseConfig(Location{
+			ConfigFlag:       path.Join(cwd, "testdata/include-main.yml"),
+			SkipGlobalConfig: true,
+		})
+		testutils.AssertNoError(t, err)
+
+		// prSections survive from the included base even though the main file
+		// declares none of its own.
+		require.Len(t, parsed.PRSections, 1)
+		require.Equal(t, "Base PRs", parsed.PRSections[0].Title)
+
+		require.Equal(t, 42, parsed.Defaults.PrsLimit)   // from the included base
+		require.Equal(t, 7, parsed.Defaults.IssuesLimit) // from the main file
+
+		// Keybindings are unioned across all layers. "c" comes from a file that
+		// include-base itself includes, so three layers are merged — which used
+		// to panic when a later merge re-read already-merged keybindings.
+		keys := make([]string, 0, len(parsed.Keybindings.Universal))
+		for _, kb := range parsed.Keybindings.Universal {
+			keys = append(keys, kb.Key)
+		}
+		require.ElementsMatch(t, []string{"a", "b", "c"}, keys)
 	})
 
 	t.Run("Should accept ANSI color indices in theme", func(t *testing.T) {

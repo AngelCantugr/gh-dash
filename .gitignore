@@ -1,5 +1,5 @@
 debug.log
-dist
+dist/
 gh-prs
 /gh-dash
 .direnv/
@@ -10,9 +10,11 @@ docs/broken-links.log
 docs/dist/
 docs/node_modules/
 docs/.astro/
-.devbox
+.devbox/
 __debug*
 testdata/gh-schema.graphql
+.task/
+resterm.env.json
 
 # Claude Code
 .claude/settings.local.json

@@ -239,7 +239,7 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 			case "enter":
 				input := m.PromptConfirmationBox.Value()
 				action := m.GetPromptConfirmationAction()
-				if input == "" || input == "Y" || input == "y" {
+				if input == "Y" || input == "y" {
 					switch action {
 					case "done":
 						cmd = m.markAsDone()
@@ -329,6 +329,10 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 			m.SetIsLoading(false)
 			m.Table.SetRows(m.BuildRows())
 			m.UpdateTotalItemsCount(m.TotalCount)
+			// If the removed item was the last one, move the current row to the new last item.
+			if m.TotalCount > 0 && m.CurrRow() >= m.TotalCount {
+				m.LastItem()
+			}
 		}
 
 	case UpdateNotificationReadStateMsg:
