@@ -15,7 +15,7 @@ Tooling is driven by `Taskfile.yaml` (go-task), **not** `make`. Devbox provides 
 | Run locally against your real config | `task` (alias for `task default` → `go run .`) |
 | Build & install as `gh` extension | `task install` (installs the local build as `gh dash`) |
 | Reinstall the released version | `task install:prod` |
-| Run all tests | `task test ./...` (wraps `prism test`) |
+| Run all tests | `task test` (wraps `prism test ... ./...`; pass flags with `task test -- <flags>`) |
 | Run a single test | `task test:one -- -run TestName ./path/to/pkg` (wraps `gotip`) |
 | Re-run last failing test | `task test:rerun` |
 | Lint | `task lint` (golangci-lint, 5 min timeout) |
@@ -27,7 +27,7 @@ Tooling is driven by `Taskfile.yaml` (go-task), **not** `make`. Devbox provides 
 | Docs dev server | `task docs` (Astro Starlight under `docs/`, pnpm) |
 | Docs production build | `task docs-build` |
 
-No git pre-commit hooks are configured — run `task fmt && task lint && task test ./...` before pushing. CI enforces `task lint`, so fixing locally saves a round trip.
+No git pre-commit hooks are configured — run `task fmt && task lint && task test` before pushing. CI enforces `task lint`, so fixing locally saves a round trip.
 
 ## Architecture
 
