@@ -174,6 +174,11 @@ func CurrentLabels(value string) []string {
 }
 
 func (src *LabelSource) LoadSuggestions(ctx LoaderContext) error {
+	if !ctx.HasRepo() {
+		src.Labels = nil
+		return nil
+	}
+
 	labels, err := data.FetchRepoLabels(fmt.Sprintf("%s/%s", ctx.RepoOwner, ctx.RepoName))
 	src.Labels = labels
 	return err

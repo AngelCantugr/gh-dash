@@ -13,6 +13,14 @@ type LoaderContext struct {
 	RepoName  string
 }
 
+// HasRepo reports whether the context is scoped to a single repository.
+// Sections that span repositories — notifications, or PR/issue filters without a
+// repo: qualifier — leave both fields empty. Repo-scoped lookups are meaningless
+// there and resolve to the literal "/", so sources must skip them.
+func (c LoaderContext) HasRepo() bool {
+	return c.RepoOwner != "" && c.RepoName != ""
+}
+
 // Sources can load suggestions, return them based on the cursor position and insert them.
 type Source interface {
 	// ExtractContext returns a context with the current word under the cursor, where

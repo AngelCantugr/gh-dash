@@ -356,3 +356,30 @@ func TestPasteIgnoredWhenInactive(t *testing.T) {
 	require.False(t, handled,
 		"paste should not be handled when controller is inactive")
 }
+
+// FetchPolicy used to control only whether a spinner was shown — the fetch command
+// was built regardless, so FetchNone still hit the network. Gating inside
+// loadSuggestions is what makes the policy assertable: a tea.Sequence command
+// cannot be drained outside the Bubble Tea runtime.
+func TestLoadSuggestionsHonorsFetchNone(t *testing.T) {
+	c := newTestController(t)
+	c.SetAutocompleteSource(&fuzzyselect.SearchQuerySource{})
+
+	require.Nil(t, c.loadSuggestions(FetchNone),
+		"FetchNone must not queue a fetch command")
+}
+
+func TestLoadSuggestionsFetchesWhenPolicyAllows(t *testing.T) {
+	c := newTestController(t)
+	c.SetAutocompleteSource(&fuzzyselect.SearchQuerySource{})
+
+	require.NotNil(t, c.loadSuggestions(FetchSilent))
+	require.NotNil(t, c.loadSuggestions(FetchWithLoading))
+}
+
+func TestLoadSuggestionsWithoutSourceDoesNotFetch(t *testing.T) {
+	c := newTestController(t)
+
+	require.Nil(t, c.loadSuggestions(FetchWithLoading),
+		"a controller with no source has nothing to load")
+}

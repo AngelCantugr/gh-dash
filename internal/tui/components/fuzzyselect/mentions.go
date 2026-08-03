@@ -139,6 +139,11 @@ func isWordBoundary(r rune) bool {
 }
 
 func (src *UserMentionSource) LoadSuggestions(ctx LoaderContext) error {
+	if !ctx.HasRepo() {
+		src.Users, src.Err = nil, nil
+		return nil
+	}
+
 	users, err := data.FetchRepoUsers(ctx.RepoOwner, ctx.RepoName)
 	src.Users = users
 	src.Err = err

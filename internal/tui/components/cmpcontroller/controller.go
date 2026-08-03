@@ -191,7 +191,7 @@ func (c *Controller) Enter(opts EnterOptions) tea.Cmd {
 	cmds := []tea.Cmd{
 		textarea.Blink,
 		c.inputBox.Focus(),
-		c.loadSuggestions(opts.EnterFetch == FetchWithLoading),
+		c.loadSuggestions(opts.EnterFetch),
 	}
 
 	return tea.Sequence(cmds...)
@@ -220,7 +220,7 @@ func (c *Controller) Update(msg tea.Msg) (tea.Cmd, bool) {
 		switch {
 		case key.Matches(msg, keys.CmpKeys.RefreshSuggestionsKey):
 			c.clearRelevantCache()
-			return c.loadSuggestions(true), true
+			return c.loadSuggestions(FetchWithLoading), true
 		}
 
 		switch msg.String() {
@@ -375,14 +375,18 @@ func (c Controller) usesAutocomplete() bool {
 	}
 }
 
-func (c Controller) loadSuggestions(showLoading bool) tea.Cmd {
-	var spinnerTickCmd tea.Cmd
+func (c Controller) loadSuggestions(policy FetchPolicy) tea.Cmd {
+	if policy == FetchNone {
+		return nil
+	}
+
 	if c.fzfSelect.Source == nil {
 		log.Error("cannot load completion suggestion without a source")
 		return nil
 	}
 
-	if showLoading {
+	var spinnerTickCmd tea.Cmd
+	if policy == FetchWithLoading {
 		spinnerTickCmd = c.fzfSelect.SetFetchLoading()
 	}
 
