@@ -104,33 +104,57 @@ func (m *Model) CursorEnd() {
 func (m *Model) Repo() (cmpcontroller.RepoRef, bool) {
 	for token := range strings.FieldsSeq(m.Value()) {
 		if strings.HasPrefix(token, "repo:") {
-			repo, found := strings.CutPrefix(token, "repo:")
+			repo, _ := strings.CutPrefix(token, "repo:")
 			parts := strings.Split(repo, "/")
-			if len(parts) < 2 {
+			// A half-typed qualifier ("repo:dlvhdr/") is not a repo. Reporting it
+			// as one makes Focus start a fetch that the loader then skips, so the
+			// user watches a spinner for a lookup that never runs.
+			if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
 				return cmpcontroller.RepoRef{}, false
 			}
+			// Build the name from the parts actually used as owner/name rather
+			// than the raw token: the fetchers cache under "owner/name", and a
+			// qualifier with extra segments would otherwise yield a cache key
+			// that never matches, silently turning the refresh key into a no-op.
 			return cmpcontroller.RepoRef{
-				NameWithOwner: repo,
+				NameWithOwner: parts[0] + "/" + parts[1],
 				Owner:         parts[0],
 				Name:          parts[1],
-			}, found
+			}, true
 		}
 	}
 	return cmpcontroller.RepoRef{}, false
 }
 
 func (m *Model) Focus() tea.Cmd {
-	repo, _ := m.Repo()
+	// Users and labels can only be fetched for a single repository. Sections that
+	// span repositories — notifications, or filters without a repo: qualifier —
+	// skip the fetch entirely rather than issuing a lookup that can only fail.
+	repo, scopedToRepo := m.Repo()
+	enterFetch := cmpcontroller.FetchWithLoading
+	if !scopedToRepo {
+		enterFetch = cmpcontroller.FetchNone
+	}
+
 	m.cmpctl.SetAutocompleteSource(&fuzzyselect.SearchQuerySource{})
 	cmd := m.cmpctl.Enter(cmpcontroller.EnterOptions{
 		Mode:                             cmpcontroller.ModeSearch,
 		Prompt:                           "",
 		Repo:                             repo,
-		EnterFetch:                       cmpcontroller.FetchWithLoading,
+		EnterFetch:                       enterFetch,
 		ConfirmDiscardOnCancel:           false,
 		HideAutocompleteWhenContextEmpty: false,
 		InitialValue:                     m.cmpctl.Value(),
 	})
+
+	// Enter deliberately leaves the popup empty, and only a completed fetch
+	// filters it afterwards. Without a fetch to wait for, filling it in here is
+	// what stops an unscoped search from opening on "no results" while the
+	// source still has repo-independent suggestions to offer, such as @me.
+	if !scopedToRepo {
+		m.cmpctl.Filter()
+	}
+
 	m.cmpctl.ShowCompletions()
 	return cmd
 }

@@ -8,7 +8,7 @@
   "packages": {
     "git": "latest",
     "gh": "latest",
-    "go": "1.23",
+    "go": "1.25.8",
     "golangci-lint": "2.10.1",
     "gofumpt": "0.8.0",
     "go-task": "3.44.1",

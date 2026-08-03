@@ -118,6 +118,14 @@ func (*SearchQuerySource) ItemsToExclude(input string, cursorPos tea.Position) [
 }
 
 func (src *SearchQuerySource) LoadSuggestions(ctx LoaderContext) error {
+	// Drop anything loaded for a previously focused repo so its users and labels
+	// can't leak into an unscoped section's completions.
+	if !ctx.HasRepo() {
+		src.Users, src.UsersErr = nil, nil
+		src.Labels, src.LabelsErr = nil, nil
+		return nil
+	}
+
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		users, err := data.FetchRepoUsers(ctx.RepoOwner, ctx.RepoName)

@@ -20,7 +20,7 @@ No releases are published from this fork — you must build and install from sou
 ### Prerequisites
 
 - **[GitHub CLI (`gh`)](https://cli.github.com/)** — required at runtime for auth and as the extension host (`gh auth login` before first run)
-- **[Go 1.23+](https://go.dev/dl/)** — compiler
+- **[Go 1.25+](https://go.dev/dl/)** — compiler
 - **[go-task](https://taskfile.dev/installation/)** — task runner (`task` CLI)
 
 ### Option A: Devbox (recommended)

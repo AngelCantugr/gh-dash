@@ -199,13 +199,20 @@ func (m *Model) Hide() {
 }
 
 // Reset clears all autocomplete state including filtered suggestions, selection,
-// and visibility flags. Use this when switching between different input modes
-// (e.g., from labeling to commenting) to prevent stale suggestions from leaking.
+// visibility flags and the last fetch result. Use this when switching between
+// different input modes (e.g., from labeling to commenting) to prevent stale
+// suggestions from leaking.
+//
+// The fetch status has to be cleared here because a focus that doesn't fetch —
+// an unscoped search — never overwrites it, and ClearFetchStatusMsg only reaches
+// the section that is currently selected.
 func (m *Model) Reset() {
 	m.filtered = nil
 	m.selected = 0
 	m.visible = false
 	m.hiddenByUser = false
+	m.fetchState = FetchStateIdle
+	m.fetchError = nil
 }
 
 // Suppress hides the popup immediately and prevents it from being shown again
